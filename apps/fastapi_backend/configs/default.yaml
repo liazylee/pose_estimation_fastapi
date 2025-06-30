@@ -1,0 +1,33 @@
+# FastAPI Backend Configuration
+
+# Server Configuration
+server:
+  host: "0.0.0.0"
+  port: 8000
+  debug: false
+  reload: false
+
+# Kafka Configuration
+kafka:
+  bootstrap_servers: "localhost:9092"
+  topic_retention_ms: 600000  # 10 minutes
+  topic_cleanup_delay: 60     # seconds
+  
+# Video Processing Configuration
+video:
+  upload_dir: "/tmp/uploads"
+  output_dir: "/tmp/outputs"
+  max_file_size: 104857600    # 100MB
+  supported_formats: ["mp4", "avi", "mov", "mkv"]
+  
+# RTSP Streaming Configuration
+rtsp:
+  host: "localhost"
+  port: 8554
+  base_url: "rtsp://localhost:8554"
+
+# Task Management
+tasks:
+  max_concurrent: 10
+  timeout_minutes: 30
+  cleanup_delay_seconds: 300 
