@@ -4,8 +4,9 @@ Serialization utilities for frame encoding/decoding.
 import base64
 import cv2
 import numpy as np
-from typing import Union, Tuple
+from typing import Union, Tuple, Dict
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -151,3 +152,180 @@ def resize_frame_if_needed(frame: np.ndarray,
     logger.debug(f"Resized frame from {width}x{height} to {new_width}x{new_height}")
     
     return resized, scale
+
+
+def encode_image_message(task_id: str, frame_id: int, timestamp: str, 
+                        image: np.ndarray, source_id: str = "") -> Dict:
+    """
+    Encode image as message for raw_frames topic.
+    
+    Args:
+        task_id: Task identifier
+        frame_id: Frame sequence number
+        timestamp: ISO timestamp
+        image: Image array (RGB or BGR)
+        source_id: Optional source identifier
+        
+    Returns:
+        Encoded message dictionary
+    """
+    try:
+        # Convert to JPEG
+        if len(image.shape) == 3 and image.shape[2] == 3:
+            # Convert RGB to BGR for OpenCV
+            image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
+        else:
+            image_bgr = image
+            
+        # Encode as JPEG
+        encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 90]
+        _, buffer = cv2.imencode('.jpg', image_bgr, encode_param)
+        
+        # Convert to base64
+        image_b64 = base64.b64encode(buffer).decode('utf-8')
+        
+        message = {
+            "task_id": task_id,
+            "frame_id": frame_id,
+            "timestamp": timestamp,
+            "source_id": source_id,
+            "image_format": "jpeg",
+            "image_bytes": image_b64
+        }
+        
+        return message
+        
+    except Exception as e:
+        logger.error(f"Error encoding image message: {e}")
+        raise
+
+
+def decode_image_message(message: Dict) -> np.ndarray:
+    """
+    Decode image from message.
+    
+    Args:
+        message: Message from raw_frames topic
+        
+    Returns:
+        Decoded image array in RGB format
+    """
+    try:
+        # Decode base64
+        image_b64 = message["image_bytes"]
+        image_bytes = base64.b64decode(image_b64)
+        
+        # Convert to numpy array
+        nparr = np.frombuffer(image_bytes, np.uint8)
+        
+        # Decode JPEG
+        image_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        # Convert BGR to RGB
+        image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
+        
+        return image_rgb
+        
+    except Exception as e:
+        logger.error(f"Error decoding image message: {e}")
+        raise
+
+
+def encode_detection_message(result: Dict) -> Dict:
+    """
+    Encode detection result for yolox topic.
+    
+    Args:
+        result: Detection result from YOLOX model
+        
+    Returns:
+        Encoded message
+    """
+    try:
+        message = {
+            "task_id": result["task_id"],
+            "frame_id": result["frame_id"], 
+            "timestamp": result["timestamp"],
+            "detections": result["result"]
+        }
+        
+        return message
+        
+    except Exception as e:
+        logger.error(f"Error encoding detection message: {e}")
+        raise
+
+
+def encode_pose_message(result: Dict) -> Dict:
+    """
+    Encode pose estimation result for rtmpose topic.
+    
+    Args:
+        result: Pose result from RTMPose model
+        
+    Returns:
+        Encoded message
+    """
+    try:
+        message = {
+            "task_id": result["task_id"],
+            "frame_id": result["frame_id"],
+            "timestamp": result["timestamp"],
+            "poses": result["result"]
+        }
+        
+        return message
+        
+    except Exception as e:
+        logger.error(f"Error encoding pose message: {e}")
+        raise
+
+
+def encode_tracking_message(result: Dict) -> Dict:
+    """
+    Encode tracking result for bytetrack topic.
+    
+    Args:
+        result: Tracking result from ByteTrack model
+        
+    Returns:
+        Encoded message
+    """
+    try:
+        message = {
+            "task_id": result["task_id"],
+            "frame_id": result["frame_id"],
+            "timestamp": result["timestamp"],
+            "tracked_poses": result["result"]
+        }
+        
+        return message
+        
+    except Exception as e:
+        logger.error(f"Error encoding tracking message: {e}")
+        raise
+
+
+# Legacy functions for backward compatibility
+def serialize_frame_message(message: Dict) -> bytes:
+    """Serialize message to bytes."""
+    return json.dumps(message).encode('utf-8')
+
+
+def deserialize_frame_message(data: bytes) -> Dict:
+    """Deserialize message from bytes.""" 
+    return json.loads(data.decode('utf-8'))
+
+
+def compress_image(image: np.ndarray, quality: int = 90) -> bytes:
+    """Compress image to JPEG bytes."""
+    encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+    _, buffer = cv2.imencode('.jpg', image, encode_param)
+    return buffer.tobytes()
+
+
+def decompress_image(image_bytes: bytes) -> np.ndarray:
+    """Decompress JPEG bytes to image."""
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    return image

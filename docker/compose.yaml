@@ -1,5 +1,6 @@
-# Docker Compose Configuration for Full Pipeline
-# Orchestrates all services with proper networking and dependencies
+# Docker Compose Configuration for Base Services Only
+# Only includes Kafka, Zookeeper, and RTSP server
+# AI services will be started separately for easier debugging
 
 # TODO: Define the following services:
 # - kafka: Kafka broker with Zookeeper
@@ -29,9 +30,9 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-    volumes:
-      - zookeeper-data:/var/lib/zookeeper/data
-      - zookeeper-logs:/var/lib/zookeeper/log
+#    volumes:
+#      - zookeeper-data:/var/lib/zookeeper/data
+#      - zookeeper-logs:/var/lib/zookeeper/log
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -57,101 +58,17 @@ services:
       KAFKA_DELETE_TOPIC_ENABLE: 'true'
       KAFKA_LOG_RETENTION_MS: 600000  # 10 minutes
       KAFKA_MESSAGE_MAX_BYTES: 52428800  # 50MB
-    volumes:
-      - kafka-data:/var/lib/kafka/data
-
-  # FastAPI Backend
-  backend:
-    build:
-      context: ..
-      dockerfile: docker/backend.Dockerfile
-    container_name: video_pipeline_backend
+#    volumes:
+#      - kafka-data:/var/lib/kafka/data
+  kafka-ui:
+    image: provectuslabs/kafka-ui
     ports:
-      - "8000:8000"
+      - "8080:8080"
     environment:
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      - PYTHONUNBUFFERED=1
-    volumes:
-      - video-uploads:/tmp/video_uploads
-      - video-outputs:/tmp/video_outputs
+      - KAFKA_CLUSTERS_0_NAME=local
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:29092
     depends_on:
       - kafka
-    command: uvicorn apps.fastapi_backend.main:app --host 0.0.0.0 --port 8000 --reload
-
-  # YOLOX Service
-  yolox:
-    build:
-      context: ..
-      dockerfile: docker/yolox.Dockerfile
-    container_name: yolox_service
-    environment:
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      - CUDA_VISIBLE_DEVICES=0
-      - PYTHONUNBUFFERED=1
-    volumes:
-      - model-weights:/models
-    depends_on:
-      - kafka
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    command: python -m apps.yolox_service.service
-
-  # RTMPose Service
-  rtmpose:
-    build:
-      context: ..
-      dockerfile: docker/rtmpose.Dockerfile
-    container_name: rtmpose_service
-    environment:
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      - CUDA_VISIBLE_DEVICES=0
-      - PYTHONUNBUFFERED=1
-    volumes:
-      - model-weights:/models
-    depends_on:
-      - kafka
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    command: python -m apps.rtmpose_service.service
-
-  # ByteTrack Service
-  bytetrack:
-    build:
-      context: ..
-      dockerfile: docker/bytetrack.Dockerfile
-    container_name: bytetrack_service
-    environment:
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      - PYTHONUNBUFFERED=1
-    depends_on:
-      - kafka
-    command: python -m apps.bytetrack_service.service
-
-  # Annotation Service
-  annotation:
-    build:
-      context: ..
-      dockerfile: docker/annotation.Dockerfile
-    container_name: annotation_service
-    environment:
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-      - PYTHONUNBUFFERED=1
-    volumes:
-      - video-outputs:/tmp/video_outputs
-    depends_on:
-      - kafka
-    command: python -m apps.annotation_service.service
-
   # RTSP Server (using MediaMTX)
   rtsp-server:
     image: bluenviron/mediamtx:latest
@@ -164,16 +81,111 @@ services:
     environment:
       - MTX_PROTOCOLS=tcp
       - MTX_RTSPADDRESS=:8554
-    volumes:
-      - ./rtsp-config.yml:/mediamtx.yml:ro
+    # volumes:
+    #   - ./rtsp-config.yml:/mediamtx.yml:ro
+
+# AI Services - Start these manually with scripts for debugging
+# Uncomment and use docker-compose when ready for production
+
+#   # FastAPI Backend
+#   backend:
+#     build:
+#       context: ..
+#       dockerfile: docker/backend.Dockerfile
+#     container_name: video_pipeline_backend
+#     ports:
+#       - "8000:8000"
+#     environment:
+#       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+#       - PYTHONUNBUFFERED=1
+#     volumes:
+#       - video-uploads:/tmp/video_uploads
+#       - video-outputs:/tmp/video_outputs
+#     depends_on:
+#       - kafka
+#     command: uvicorn apps.fastapi_backend.main:app --host 0.0.0.0 --port 8000 --reload
+# 
+#   # YOLOX Service
+#   yolox:
+#     build:
+#       context: ..
+#       dockerfile: docker/yolox.Dockerfile
+#     container_name: yolox_service
+#     environment:
+#       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+#       - CUDA_VISIBLE_DEVICES=0
+#       - PYTHONUNBUFFERED=1
+#     volumes:
+#       - model-weights:/models
+#     depends_on:
+#       - kafka
+#     deploy:
+#       resources:
+#         reservations:
+#           devices:
+#             - driver: nvidia
+#               count: 1
+#               capabilities: [gpu]
+#     command: python -m apps.yolox_service.service
+# 
+#   # RTMPose Service
+#   rtmpose:
+#     build:
+#       context: ..
+#       dockerfile: docker/rtmpose.Dockerfile
+#     container_name: rtmpose_service
+#     environment:
+#       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+#       - CUDA_VISIBLE_DEVICES=0
+#       - PYTHONUNBUFFERED=1
+#     volumes:
+#       - model-weights:/models
+#     depends_on:
+#       - kafka
+#     deploy:
+#       resources:
+#         reservations:
+#           devices:
+#             - driver: nvidia
+#               count: 1
+#               capabilities: [gpu]
+#     command: python -m apps.rtmpose_service.service
+# 
+#   # ByteTrack Service
+#   bytetrack:
+#     build:
+#       context: ..
+#       dockerfile: docker/bytetrack.Dockerfile
+#     container_name: bytetrack_service
+#     environment:
+#       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+#       - PYTHONUNBUFFERED=1
+#     depends_on:
+#       - kafka
+#     command: python -m apps.bytetrack_service.service
+# 
+#   # Annotation Service
+#   annotation:
+#     build:
+#       context: ..
+#       dockerfile: docker/annotation.Dockerfile
+#     container_name: annotation_service
+#     environment:
+#       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
+#       - PYTHONUNBUFFERED=1
+#     volumes:
+#       - video-outputs:/tmp/video_outputs
+#     depends_on:
+#       - kafka
+#     command: python -m apps.annotation_service.service
 
 volumes:
   zookeeper-data:
   zookeeper-logs:
   kafka-data:
-  video-uploads:
-  video-outputs:
-  model-weights:
+  # video-uploads:
+  # video-outputs:
+  # model-weights:
 
 networks:
   default:

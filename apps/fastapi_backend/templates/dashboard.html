@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AI Video Processing Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <!-- Add HLS.js for better video streaming support -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+<header>
+    <h2>AI Video Processing Dashboard with MMPose</h2>
+</header>
+
+<div class="grid">
+    <!-- Section 1: Video Upload -->
+    <div class="section">
+        <h3>📷 Video Upload</h3>
+        <div class="controls">
+            <!-- File upload controls -->
+            <div id="uploadControls">
+                <input type="file" id="videoFile" accept="video/*" onchange="onFileSelected()">
+                <button onclick="uploadFile()" class="btn-primary" id="uploadBtn" disabled>Upload & Process</button>
+                <div class="progress hidden" id="uploadProgress">
+                    <div class="progress-bar" id="progressBar"></div>
+                    <div class="progress-text" id="progressText">0%</div>
+                </div>
+                <div class="upload-info">Supported formats: MP4, AVI, MOV, MKV</div>
+            </div>
+        </div>
+
+        <div class="status" id="status">Ready to upload video...</div>
+    </div>
+
+    <!-- Section 2: Task Status -->
+    <div class="section">
+        <h3>📊 Processing Status</h3>
+        <div id="taskStatus">
+            <div class="task-info">
+                <div>Task ID: <span id="currentTaskId">None</span></div>
+                <div>Status: <span id="currentStatus">Ready</span></div>
+                <div>Progress: <span id="currentProgress">0%</span></div>
+                <div>RTSP Stream: <span id="streamUrl">None</span></div>
+                <div>Stream Status: <span id="streamStatus">Inactive</span></div>
+            </div>
+            <div style="margin-top: 10px;">
+                <button onclick="refreshStatus()" class="btn-primary">Refresh Status</button>
+                <button onclick="copyStreamUrl()" class="btn-secondary" id="copyStreamBtn" disabled>Copy Stream URL</button>
+                <button onclick="refreshActiveStreams()" class="btn-secondary">Refresh Streams</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section 3: Stream Preview -->
+    <div class="section">
+        <h3>🎥 Stream Preview</h3>
+        <div id="streamPreview">
+            <video id="streamVideo" controls style="width: 100%; max-height: 300px; background: #000;">
+                Your browser does not support the video tag.
+            </video>
+            <div class="stream-controls">
+                <button onclick="loadStream()" class="btn-primary" id="loadStreamBtn" disabled>Load RTSP Stream</button>
+                <button onclick="stopStream()" class="btn-danger" id="stopStreamBtn" disabled>Stop Stream</button>
+                <div class="upload-info">Note: RTSP streams may require VLC or specialized player. HLS conversion coming soon.</div>
+            </div>
+            <div class="stream-info">
+                <div>Active Streams: <span id="activeStreamCount">0</span></div>
+                <div id="activeStreamsList"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section 4: File Management -->
+    <div class="section">
+        <h3>📁 File Management</h3>
+        <div id="fileManager">
+            <button onclick="refreshFileList()" class="btn-primary">Refresh File List</button>
+            <button onclick="refreshTaskList()" class="btn-secondary">Refresh Tasks</button>
+            
+            <div class="file-section">
+                <h4>Uploaded Files:</h4>
+                <div class="file-list" id="filesList">
+                    <div class="loading">Click "Refresh File List" to see uploaded files</div>
+                </div>
+            </div>
+
+            <div class="file-section">
+                <h4>Processing Tasks:</h4>
+                <div class="file-list" id="tasksList">
+                    <div class="loading">Click "Refresh Tasks" to see processing tasks</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Section 5: System Info -->
+    <div class="section">
+        <h3>ℹ️ System Information</h3>
+        <div class="info-grid" id="systemInfo">
+            <div>Server Status: <span id="serverStatus">Unknown</span></div>
+            <div>Kafka Status: <span id="kafkaStatus">Unknown</span></div>
+            <div>RTSP Server: <span id="rtspStatus">localhost:8554</span></div>
+            <div>Active Tasks: <span id="activeTasks">0</span></div>
+        </div>
+        
+        <div class="api-section">
+            <h4>Quick Actions:</h4>
+            <button onclick="checkHealth()" class="btn-secondary">Health Check</button>
+            <button onclick="refreshSystemInfo()" class="btn-secondary">Refresh Info</button>
+            <button onclick="stopAllStreams()" class="btn-danger">Stop All Streams</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal for displaying results -->
+<div id="resultModal" class="modal hidden">
+    <div class="modal-content">
+        <span class="close" onclick="closeModal()">&times;</span>
+        <h3>Processing Result</h3>
+        <div id="modalContent"></div>
+    </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html> 

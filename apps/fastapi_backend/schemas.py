@@ -2,7 +2,7 @@
 Pydantic schemas for FastAPI endpoints.
 """
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict, Any
 from pydantic import BaseModel
 
 
@@ -28,3 +28,9 @@ class TaskStatus(BaseModel):
         json_encoders = {
             datetime: lambda v: v.isoformat()
         }
+
+
+class AIPipelineStartRequest(BaseModel):
+    """Request model for starting AI pipeline."""
+    task_id: str
+    config: Optional[Dict[str, Any]] = None

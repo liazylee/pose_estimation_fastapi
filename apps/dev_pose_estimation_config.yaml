@@ -1,0 +1,210 @@
+# AI Multi-Person Pose Estimation System Configuration File
+# This file contains configuration parameters for all services, can be modified as needed
+
+# Global configuration
+global:
+  # Computing device: cuda or cpu
+  devices: "cuda"
+  # Log level: DEBUG, INFO, WARN, ERROR
+  log_level: "INFO"
+  # Startup delay between services (seconds)
+  startup_delay: 5
+  # Number of worker processes per device
+  num_workers_per_device: 1
+  # Inference backend: onnxruntime, openvino, tensorrt
+  backend: "onnxruntime"
+
+# RTSP stream configuration
+rtsp:
+  # Input stream address (Docker services use internal network)
+  input_stream: "rtsp://localhost:8554"
+  input_topic: "mystream"
+  # Output stream address
+  output_stream: "rtsp://localhost:8554"
+  output_topic: "outstream"
+  # Output video parameters
+  output_width: 1920
+  output_height: 1080
+  output_fps: 25
+
+# Kafka message queue configuration (replaces MQTT)
+kafka:
+  # Kafka server address (Docker services use internal network)
+  bootstrap_servers: "localhost:9092"
+  # Topic configuration templates (use {task_id} placeholder)
+  topics:
+    raw_frames: "raw_frames_{task_id}"
+    yolox_output: "yolox_detections_{task_id}"
+    rtmpose_output: "rtmpose_results_{task_id}"
+    bytetrack_output: "bytetrack_tracking_{task_id}"
+  # Consumer group configuration
+  consumer_groups:
+    yolox_service: "yolox_consumers_{task_id}"
+    rtmpose_service: "rtmpose_consumers_{task_id}"
+    bytetrack_service: "bytetrack_consumers_{task_id}"
+    annotation_service: "annotation_consumers_{task_id}"
+  # Kafka producer/consumer settings
+  producer:
+    acks: "all"
+    retries: 3
+    batch_size: 16384
+    linger_ms: 10
+    compression_type: "gzip"
+  consumer:
+    auto_offset_reset: "latest"
+    max_poll_records: 1
+    consumer_timeout_ms: 1000
+    enable_auto_commit: true
+  # Queue length limits
+  queue_limits:
+    yolox_output: 50
+    rtmpose_input: 100
+    rtmpose_output: 100
+    bytetrack_input: 100
+    bytetrack_output: 100
+    annotation_input1: 100
+    annotation_input2: 100
+
+# YOLOX object detection service configuration
+yolox:
+  enabled: true
+  # Model input size [width, height]
+  model_input_size: [640, 640]
+  # Model URL (will be downloaded automatically)
+  model_url: "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/yolox_m_8xb8-300e_humanart-c2c7a14a.zip"
+  # Device configuration
+  devices: "cuda"
+  backend: "onnxruntime"
+  # Model configuration
+  model:
+    confidence_threshold: 0.5
+    nms_threshold: 0.45
+  # Input configuration - now using Kafka instead of RTSP
+  input:
+    type: "kafka"
+    config: "kafka://localhost:9092,topic=raw_frames_{task_id},group_id=yolox_consumers_{task_id}"
+  # Output configuration - using Kafka instead of MQTT
+  output:
+    type: "kafka"
+    config: "kafka://localhost:9092,topic=yolox_detections_{task_id},acks=all,compression_type=gzip"
+
+# RTMPose pose estimation service configuration
+rtmpose:
+  enabled: true
+  # Model input size [width, height]
+  model_input_size: [192, 256]
+  # Model URL
+  model_url: "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-m_simcc-body7_pt-body7_420e-256x192-e48f03d0_20230504.zip"
+  # Device configuration
+  devices: "cuda"
+  backend: "onnxruntime"
+  # Input configuration (multi-input) - now using Kafka
+  input:
+    raw_frames:
+      type: "kafka"
+      config: "kafka://localhost:9092,topic=raw_frames_{task_id},group_id=rtmpose_raw_{task_id}"
+    detections:
+      type: "kafka"
+      config: "kafka://localhost:9092,topic=yolox_detections_{task_id},group_id=rtmpose_det_{task_id}"
+  # Output configuration - using Kafka
+  output:
+    type: "kafka"
+    config: "kafka://localhost:9092,topic=rtmpose_results_{task_id},acks=all,compression_type=gzip"
+
+# ByteTrack object tracking service configuration
+bytetrack:
+  enabled: true
+  # Tracking parameters
+  track_thresh: 0.45
+  match_thresh: 0.8
+  track_buffer: 25
+  frame_rate: 30
+  per_class: false
+  # Device configuration
+  devices: "cpu"
+  # Input configuration - using Kafka
+  input:
+    type: "kafka"
+    config: "kafka://localhost:9092,topic=yolox_detections_{task_id},group_id=bytetrack_consumers_{task_id}"
+  # Output configuration - using Kafka
+  output:
+    type: "kafka"
+    config: "kafka://localhost:9092,topic=bytetrack_tracking_{task_id},acks=all,compression_type=gzip"
+
+# Annotation visualization service configuration
+annotation:
+  enabled: true
+  # Device configuration
+  devices: "cpu"
+  # Input configuration (multi-input) - mixed Kafka and RTSP
+  input:
+    raw_frames:
+      type: "kafka"
+      config: "kafka://localhost:9092,topic=raw_frames_{task_id},group_id=annotation_raw_{task_id}"
+    tracking:
+      type: "kafka"
+      config: "kafka://localhost:9092,topic=bytetrack_tracking_{task_id},group_id=annotation_track_{task_id}"
+    poses:
+      type: "kafka"
+      config: "kafka://localhost:9092,topic=rtmpose_results_{task_id},group_id=annotation_pose_{task_id}"
+  # Output configuration - still RTSP for final visualization
+  output:
+    type: "rtsp"
+    config: "rtsp://localhost:8554,topic=outstream_{task_id},width=1920,height=1080,fps=25"
+
+# Service dependencies (startup order)
+service_dependencies:
+  - name: "yolox"
+    depends_on: []
+    description: "Object detection service, detects human bounding boxes from Kafka raw frames"
+  - name: "rtmpose"
+    depends_on: ["yolox"]
+    description: "Pose estimation service, receives detection results for pose estimation"
+  - name: "bytetrack"
+    depends_on: ["yolox"]
+    description: "Object tracking service, tracks detected objects"
+  - name: "annotation"
+    depends_on: ["rtmpose", "bytetrack"]
+    description: "Visualization service, aggregates all results and outputs"
+
+# Monitoring configuration
+monitoring:
+  # Monitoring interval (seconds)
+  interval: 10
+  # Monitoring metrics
+  metrics:
+    - queue_sizes
+    - processing_rates
+    - memory_usage
+    - gpu_usage
+    - kafka_lag
+  # Alert thresholds
+  alerts:
+    queue_size_threshold: 1000
+    memory_usage_threshold: 0.8
+    gpu_memory_threshold: 0.9
+    kafka_lag_threshold: 1000
+
+# Logging configuration
+logging:
+  # Log file configuration
+  file:
+    enabled: true
+    path: "logs"
+    filename_pattern: "pose_estimation_{timestamp}.log"
+    max_size: "100MB"
+    backup_count: 10
+  # Console output
+  console:
+    enabled: true
+    format: "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+  # Service-specific logging
+  services:
+    yolox:
+      level: "INFO"
+    rtmpose:
+      level: "INFO"
+    bytetrack:
+      level: "INFO"
+    annotation:
+      level: "INFO" 

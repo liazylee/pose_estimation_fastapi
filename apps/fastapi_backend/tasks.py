@@ -14,21 +14,20 @@ Background tasks for video processing pipeline.
 """
 import logging
 import time
-from datetime import datetime
-from pathlib import Path
+from datetime import datetime, timezone
 from typing import Dict
 
-from .video_utils import extract_frames_and_publish
 from .kafka_controller import KafkaController
 from .schemas import TaskStatus
+from .video_utils import extract_frames_and_publish
 
 logger = logging.getLogger(__name__)
 
 
-def process_video_task(task_id: str, 
-                      video_path: str, 
-                      kafka_controller: KafkaController,
-                      status_db: Dict[str, TaskStatus]):
+def process_video_task(task_id: str,
+                       video_path: str,
+                       kafka_controller: KafkaController,
+                       status_db: Dict[str, TaskStatus]):
     """
     Main background task for processing uploaded video.
     
@@ -39,14 +38,14 @@ def process_video_task(task_id: str,
         status_db: Task status database
     """
     logger.info(f"Starting video processing for task {task_id}")
-    
+
     try:
         # Update status to processing
         if task_id in status_db:
             status_db[task_id].status = "processing"
             status_db[task_id].progress = 10
-            status_db[task_id].updated_at = datetime.now(datetime.UTC)
-        
+            status_db[task_id].updated_at = datetime.now(timezone.utc)
+
         # Extract and publish frames
         logger.info(f"Extracting frames from {video_path}")
         extract_frames_and_publish(
@@ -55,51 +54,51 @@ def process_video_task(task_id: str,
             skip_frames=0,  # Process all frames
             jpeg_quality=85
         )
-        
+
         # Update progress
         if task_id in status_db:
             status_db[task_id].progress = 50
-            status_db[task_id].updated_at = datetime.now(datetime.UTC)
-        
+            status_db[task_id].updated_at = datetime.now(timezone.utc)
+
         # Wait for AI services to process
         # In production, this would monitor the bytetrack topic for completion
         logger.info("Waiting for AI services to complete processing...")
-        
+
         # TODO: Implement proper completion detection
         # For now, we'll simulate with a timeout
         wait_for_completion(task_id, timeout_seconds=120, status_db=status_db)
-        
+
         # Generate output file path
-        output_path = Path(f"/tmp/video_outputs/{task_id}_output.mp4")
-        output_path.parent.mkdir(exist_ok=True)
-        
+        # output_path = Path(f"/tmp/video_outputs/{task_id}_output.mp4")
+        # output_path.parent.mkdir(exist_ok=True)
+
         # Update final status
         if task_id in status_db:
             status_db[task_id].status = "completed"
             status_db[task_id].progress = 100
-            status_db[task_id].output_file = str(output_path)
-            status_db[task_id].updated_at = datetime.now(datetime.UTC)
-        
+            # status_db[task_id].output_file = str(output_path)
+            status_db[task_id].updated_at = datetime.now(timezone.utc)
+
         logger.info(f"Task {task_id} completed successfully")
-        
+
         # Schedule topic cleanup
-        kafka_controller.delete_topics_for_task(task_id, delay_seconds=60)
-        
+        kafka_controller.delete_topics_for_task(task_id, delay_seconds=60 * 60 * 2)
+
     except Exception as e:
         logger.error(f"Error processing task {task_id}: {e}")
-        
+
         if task_id in status_db:
             status_db[task_id].status = "failed"
             status_db[task_id].error = str(e)
-            status_db[task_id].updated_at = datetime.now(datetime.UTC)
-        
+            status_db[task_id].updated_at = datetime.now(timezone.utc)
+
         # Clean up topics on failure
-        kafka_controller.delete_topics_for_task(task_id, delay_seconds=10)
+        kafka_controller.delete_topics_for_task(task_id, delay_seconds=10 * 60 * 3)
 
 
-def wait_for_completion(task_id: str, 
-                       timeout_seconds: int = 300,
-                       status_db: Dict[str, TaskStatus] = None):
+def wait_for_completion(task_id: str,
+                        timeout_seconds: int = 300,
+                        status_db: Dict[str, TaskStatus] = None):
     """
     Wait for AI pipeline to complete processing.
     
@@ -115,19 +114,19 @@ def wait_for_completion(task_id: str,
     """
     start_time = time.time()
     check_interval = 5  # seconds
-    
+
     while time.time() - start_time < timeout_seconds:
         # Simulate progress updates
         elapsed = time.time() - start_time
         progress = min(50 + (elapsed / timeout_seconds) * 40, 90)
-        
+
         if status_db and task_id in status_db:
             status_db[task_id].progress = int(progress)
-            status_db[task_id].updated_at = datetime.now(datetime.UTC)
-        
+            status_db[task_id].updated_at = datetime.now(timezone.utc)
+
         # TODO: Check actual completion by monitoring Kafka topics
         # Example: Check if annotation service has processed all frames
-        
+
         time.sleep(check_interval)
-    
+
     logger.info(f"Completion wait finished for task {task_id}")

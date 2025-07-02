@@ -34,6 +34,7 @@ class AnnotationService:
         self.frame_buffers = defaultdict(dict)  # task_id -> {frame_id -> data}
         self.pose_buffers = defaultdict(dict)   # task_id -> {frame_id -> data}
         self.output_writers = {}  # task_id -> video writer
+        self.task_metadata = {}  # task_id -> metadata (fps, width, height, etc.)
         
         # Setup signal handlers
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -51,6 +52,22 @@ class AnnotationService:
         
         # Store frame data
         self.frame_buffers[task_id][frame_id] = message
+        
+        # Initialize RTSP stream for task if not exists
+        if task_id not in self.task_metadata and 'metadata' in message:
+            metadata = message['metadata']
+            self.task_metadata[task_id] = metadata
+            
+            # Create RTSP stream for this task
+            stream_url = self.rtsp_manager.create_stream(
+                task_id=task_id,
+                width=int(metadata['original_width']),
+                height=int(metadata['original_height']),
+                fps=float(metadata['fps'])
+            )
+            
+            if stream_url:
+                logger.info(f"Created RTSP stream for task {task_id}: {stream_url}")
         
         # Check if we have matching pose data
         self._try_process_synchronized_data(task_id, frame_id)
@@ -102,13 +119,12 @@ class AnnotationService:
                 frame_data.get('metadata', {})
             )
             
-            # Output the frame
-            # TODO: Implement actual video writing or RTSP streaming
-            # For now, we'll log progress
+            # Push annotated frame to RTSP stream
+            success = self.rtsp_manager.push_frame(task_id, annotated_frame)
             
             if frame_data['frame_id'] % 30 == 0:  # Log every 30 frames
-                logger.info(f"Annotated frame {frame_data['frame_id']} for task {task_id}, "
-                           f"rendered {len(tracked_poses)} people")
+                logger.info(f"Annotated and streamed frame {frame_data['frame_id']} for task {task_id}, "
+                           f"rendered {len(tracked_poses)} people, stream_success: {success}")
             
         except Exception as e:
             logger.error(f"Error annotating frame: {e}")
