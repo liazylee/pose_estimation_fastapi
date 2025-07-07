@@ -17,9 +17,9 @@ import time
 from datetime import datetime, timezone
 from typing import Dict
 
-from .kafka_controller import KafkaController
-from .schemas import TaskStatus
-from .video_utils import extract_frames_and_publish
+from kafka_controller import KafkaController
+from schemas import TaskStatus
+from video_utils import extract_frames_and_publish
 
 logger = logging.getLogger(__name__)
 

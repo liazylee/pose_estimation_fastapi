@@ -40,14 +40,14 @@ class YOLOXService:
     def __init__(self, config_path: str = "dev_pose_estimation_config.yaml", task_id: str = None):
         if task_id is None:
             raise ValueError("task_id is required and cannot be None. Please specify a task_id.")
-        
+
         self.task_id = task_id
         self.config = self._load_config(config_path)
         self.processor = None
         self.service = None
         self.input_interface = None
         self.output_interface = None
-        
+
         logger.info(f"YOLOX Service initialized with task_id: '{self.task_id}'")
 
     def _load_config(self, config_path: str) -> Dict[str, Any]:
@@ -55,7 +55,7 @@ class YOLOXService:
         # Try multiple possible locations for the config file
         # Get the absolute path of the current script
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        
+
         possible_paths = [
             config_path,  # Absolute path or relative to current working directory
             os.path.join(script_dir, config_path),  # Relative to service directory
@@ -231,7 +231,7 @@ class YOLOXService:
         return {
             'workers_per_device': global_config.get('num_workers_per_device', 1),
             'health_check_interval': 5.0,
-            'max_restart_attempts': 3,
+            'max_restart_attempts': 30,
             'restart_cooldown': 30.0
         }
 

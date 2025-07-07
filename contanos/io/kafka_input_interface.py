@@ -1,5 +1,4 @@
 import asyncio
-import base64
 import json
 import logging
 import time
@@ -7,10 +6,7 @@ import uuid
 from abc import ABC
 from asyncio import Queue
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, Tuple
-
-import cv2
-import numpy as np
+from typing import Any, Dict, Optional
 
 try:
     from kafka import KafkaConsumer
@@ -41,8 +37,10 @@ class KafkaInput(ABC):
         self.enable_auto_commit = config.get('enable_auto_commit', True)
 
         # Asyncio constructs
-        self.message_queue: Queue = Queue(maxsize=100)
-        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"kafka_{self.group_id}")
+        self.message_queue: Queue = Queue(maxsize=config.get('message_queue_size', 100))
+        self.consumer = KafkaConsumer()
+        self._executor = ThreadPoolExecutor(max_workers=config.get('max_workers', 1),
+                                            thread_name_prefix=f"kafka_{self.group_id}")
         self._loop: asyncio.AbstractEventLoop | None = None
 
         # Kafka consumer
@@ -50,11 +48,11 @@ class KafkaInput(ABC):
         self.is_running = False
         self._consumer_task = None
 
+    # initialize the Kafka consumer and start the background loop
     async def initialize(self) -> bool:
         """Initialize Kafka connection and start background loop."""
         try:
             self._loop = asyncio.get_running_loop()
-            self._executor = ThreadPoolExecutor(max_workers=1)
 
             logging.info(f"Starting Kafka consumer for servers {self.bootstrap_servers}")
 
@@ -81,6 +79,7 @@ class KafkaInput(ABC):
             logging.error(f"Failed to initialize Kafka input: {e}")
             return False
 
+    # kafka consumer background task to poll messages and process them
     async def _consume_messages(self):
         """Background task to consume messages from Kafka."""
         while self.is_running:
@@ -111,47 +110,20 @@ class KafkaInput(ABC):
         except Exception as e:
             logging.error(f"Error queuing Kafka message: {e}")
 
-    def _process_message(self, record):
+    def _process_message(self, record) -> Optional[Dict[str, Any]]:
+        """
+        """
         try:
-            payload_str = record.value
-
-            if not payload_str:
-                return None
-
-            try:
-                payload_data = json.loads(payload_str)
-            except json.JSONDecodeError:
-                logging.error(f"Failed to parse JSON from Kafka message: {payload_str[:100]}...")
-                return None
-
-            # Extract frame from base64
-            if 'image_bytes' in payload_data:
-                image_data = base64.b64decode(payload_data['image_bytes'])
-                frame_np = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
-            elif 'image_data' in payload_data:
-                image_data = base64.b64decode(payload_data['image_data'])
-                frame_np = cv2.imdecode(np.frombuffer(image_data, np.uint8), cv2.IMREAD_COLOR)
-            elif 'frame_data' in payload_data:
-                frame_np = np.array(payload_data['frame_data'])
-            else:
-                logging.warning(f"No image data found in message: {list(payload_data.keys())}")
-                return None
-
-            return {
-                'data': frame_np,
-                'frame_id_str': str(payload_data.get('frame_id', record.offset)),
-                'topic': record.topic,
-                'partition': record.partition,
-                'offset': record.offset,
-                'timestamp': record.timestamp or time.time() * 1000,
-                'payload': payload_data
-            }
-
-        except Exception as e:
-            logging.error(f"Error processing Kafka message: {e}")
+            message = json.loads(record.value)
+            if not isinstance(message, dict):
+                raise ValueError("Kafka message must be a JSON object")
+            if message.get('frame_id_str') is None:
+                pass
+        except ValueError as e:
+            logging.error(f"Invalid Kafka message format: {e}")
             return None
 
-    async def read_data(self) -> Tuple[Any, Dict[str, Any]]:
+    async def read_data(self) -> Optional[Dict[str, Any]]:
         """Read message from queue."""
         if not self.is_running:
             raise Exception("Kafka input not initialized or stopped")
@@ -159,37 +131,16 @@ class KafkaInput(ABC):
         try:
             message = await asyncio.wait_for(self.message_queue.get(), timeout=5.0)
 
-            data = message['data']
-            
-            # Extract original payload data
-            original_payload = message.get('payload', {})
-            
-            # Create comprehensive metadata combining original payload fields and processing info
-            metadata = {
-                # Original message fields
-                'task_id': original_payload.get('task_id'),
-                'frame_id': original_payload.get('frame_id'),
-                'timestamp': original_payload.get('timestamp', message['timestamp']),
-                'source_id': original_payload.get('source_id'),
-                'image_format': original_payload.get('image_format'),
-                'metadata': original_payload.get('metadata', {}),
-                
-                # Processing metadata
-                'frame_id_str': message.get('frame_id_str'),
-                'topic': message['topic'],
-                'partition': message['partition'],
-                'offset': message['offset'],
-                'kafka_timestamp': message['timestamp'],
-                'payload_type': type(data).__name__
-            }
-
-            self.message_queue.task_done()
-            return data, metadata
-
         except asyncio.TimeoutError:
-            raise Exception("No Kafka message received within timeout")
+            logging.warning("Timeout waiting for Kafka message")
+            return None
+        except asyncio.CancelledError:
+            logging.info("Kafka input read_data task cancelled")
+            return None
         except Exception as e:
-            raise Exception(f"Failed to read Kafka message: {e}")
+            logging.error(f"Error reading Kafka message: {e}")
+            return None
+        return message
 
     async def cleanup(self):
         """Clean up Kafka resources."""

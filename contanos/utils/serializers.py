@@ -1,12 +1,13 @@
 """
-Serialization utilities for frame encoding/decoding.
+Serialization utilities for contanos framework.
 """
 import base64
+import json
+import logging
+from typing import Union, Tuple, Dict
+
 import cv2
 import numpy as np
-from typing import Union, Tuple, Dict
-import logging
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -26,10 +27,10 @@ def encode_frame_to_jpeg(frame: np.ndarray, quality: int = 85) -> bytes:
     bgr_frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     encode_params = [cv2.IMWRITE_JPEG_QUALITY, quality]
     success, buffer = cv2.imencode('.jpg', bgr_frame, encode_params)
-    
+
     if not success:
         raise ValueError("Failed to encode frame to JPEG")
-    
+
     return buffer.tobytes()
 
 
@@ -45,10 +46,10 @@ def decode_jpeg_to_frame(jpeg_bytes: bytes) -> np.ndarray:
     """
     nparr = np.frombuffer(jpeg_bytes, np.uint8)
     bgr_frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    
+
     if bgr_frame is None:
         raise ValueError("Failed to decode JPEG bytes")
-    
+
     # Convert BGR to RGB
     rgb_frame = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
     return rgb_frame
@@ -83,48 +84,8 @@ def decode_base64_to_frame(base64_str: str) -> np.ndarray:
     return decode_jpeg_to_frame(jpeg_bytes)
 
 
-def serialize_image_for_kafka(image: np.ndarray, 
-                            use_base64: bool = True,
-                            quality: int = 85) -> Union[str, list]:
-    """
-    Serialize numpy image for Kafka transmission.
-    
-    Args:
-        image: RGB numpy array
-        use_base64: If True, return base64 string. If False, return bytes as list
-        quality: JPEG compression quality
-        
-    Returns:
-        Serialized image data
-    """
-    if use_base64:
-        return encode_frame_to_base64(image, quality)
-    else:
-        jpeg_bytes = encode_frame_to_jpeg(image, quality)
-        return list(jpeg_bytes)  # Convert to list for JSON serialization
-
-
-def deserialize_image_from_kafka(image_data: Union[str, list],
-                               is_base64: bool = True) -> np.ndarray:
-    """
-    Deserialize image data from Kafka message.
-    
-    Args:
-        image_data: Serialized image data (base64 string or byte list)
-        is_base64: Whether the data is base64 encoded
-        
-    Returns:
-        RGB numpy array
-    """
-    if is_base64:
-        return decode_base64_to_frame(image_data)
-    else:
-        jpeg_bytes = bytes(image_data)
-        return decode_jpeg_to_frame(jpeg_bytes)
-
-
-def resize_frame_if_needed(frame: np.ndarray, 
-                         max_dimension: int = 1920) -> Tuple[np.ndarray, float]:
+def resize_frame_if_needed(frame: np.ndarray,
+                           max_dimension: int = 1920) -> Tuple[np.ndarray, float]:
     """
     Resize frame if it exceeds maximum dimension while maintaining aspect ratio.
     
@@ -136,26 +97,26 @@ def resize_frame_if_needed(frame: np.ndarray,
         Tuple of (resized_frame, scale_factor)
     """
     height, width = frame.shape[:2]
-    
+
     if width <= max_dimension and height <= max_dimension:
         return frame, 1.0
-    
+
     if width > height:
         scale = max_dimension / width
     else:
         scale = max_dimension / height
-    
+
     new_width = int(width * scale)
     new_height = int(height * scale)
-    
+
     resized = cv2.resize(frame, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
     logger.debug(f"Resized frame from {width}x{height} to {new_width}x{new_height}")
-    
+
     return resized, scale
 
 
-def encode_image_message(task_id: str, frame_id: int, timestamp: str, 
-                        image: np.ndarray, source_id: str = "") -> Dict:
+def encode_image_message(task_id: str, frame_id: int, timestamp: str,
+                         image: np.ndarray, source_id: str = "") -> Dict:
     """
     Encode image as message for raw_frames topic.
     
@@ -176,14 +137,14 @@ def encode_image_message(task_id: str, frame_id: int, timestamp: str,
             image_bgr = cv2.cvtColor(image, cv2.COLOR_RGB2BGR)
         else:
             image_bgr = image
-            
+
         # Encode as JPEG
         encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 90]
         _, buffer = cv2.imencode('.jpg', image_bgr, encode_param)
-        
+
         # Convert to base64
         image_b64 = base64.b64encode(buffer).decode('utf-8')
-        
+
         message = {
             "task_id": task_id,
             "frame_id": frame_id,
@@ -192,9 +153,9 @@ def encode_image_message(task_id: str, frame_id: int, timestamp: str,
             "image_format": "jpeg",
             "image_bytes": image_b64
         }
-        
+
         return message
-        
+
     except Exception as e:
         logger.error(f"Error encoding image message: {e}")
         raise
@@ -214,18 +175,18 @@ def decode_image_message(message: Dict) -> np.ndarray:
         # Decode base64
         image_b64 = message["image_bytes"]
         image_bytes = base64.b64decode(image_b64)
-        
+
         # Convert to numpy array
         nparr = np.frombuffer(image_bytes, np.uint8)
-        
+
         # Decode JPEG
         image_bgr = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
+
         # Convert BGR to RGB
         image_rgb = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2RGB)
-        
+
         return image_rgb
-        
+
     except Exception as e:
         logger.error(f"Error decoding image message: {e}")
         raise
@@ -244,13 +205,13 @@ def encode_detection_message(result: Dict) -> Dict:
     try:
         message = {
             "task_id": result["task_id"],
-            "frame_id": result["frame_id"], 
+            "frame_id": result["frame_id"],
             "timestamp": result["timestamp"],
             "detections": result["result"]
         }
-        
+
         return message
-        
+
     except Exception as e:
         logger.error(f"Error encoding detection message: {e}")
         raise
@@ -273,9 +234,9 @@ def encode_pose_message(result: Dict) -> Dict:
             "timestamp": result["timestamp"],
             "poses": result["result"]
         }
-        
+
         return message
-        
+
     except Exception as e:
         logger.error(f"Error encoding pose message: {e}")
         raise
@@ -298,22 +259,62 @@ def encode_tracking_message(result: Dict) -> Dict:
             "timestamp": result["timestamp"],
             "tracked_poses": result["result"]
         }
-        
+
         return message
-        
+
     except Exception as e:
         logger.error(f"Error encoding tracking message: {e}")
         raise
 
 
-# Legacy functions for backward compatibility
+def serialize_image_for_kafka(image: np.ndarray,
+                              use_base64: bool = True,
+                              quality: int = 85) -> Union[str, list]:
+    """
+    Serialize numpy image for Kafka transmission.
+    
+    Args:
+        image: RGB numpy array
+        use_base64: If True, return base64 string. If False, return bytes as list
+        quality: JPEG compression quality
+        
+    Returns:
+        Serialized image data
+    """
+    if use_base64:
+        return encode_frame_to_base64(image, quality)
+    else:
+        jpeg_bytes = encode_frame_to_jpeg(image, quality)
+        return list(jpeg_bytes)  # Convert to list for JSON serialization
+
+
+def deserialize_image_from_kafka(image_data: Union[str, list],
+                                 is_base64: bool = True) -> np.ndarray:
+    """
+    Deserialize image data from Kafka message.
+    
+    Args:
+        image_data: Serialized image data (base64 string or byte list)
+        is_base64: Whether the data is base64 encoded
+        
+    Returns:
+        RGB numpy array
+    """
+    if is_base64:
+        return decode_base64_to_frame(image_data)
+    else:
+        jpeg_bytes = bytes(image_data)
+        return decode_jpeg_to_frame(jpeg_bytes)
+
+
+# Legacy compatibility functions
 def serialize_frame_message(message: Dict) -> bytes:
     """Serialize message to bytes."""
     return json.dumps(message).encode('utf-8')
 
 
 def deserialize_frame_message(data: bytes) -> Dict:
-    """Deserialize message from bytes.""" 
+    """Deserialize message from bytes."""
     return json.loads(data.decode('utf-8'))
 
 

@@ -1,404 +1,251 @@
-# RTMPose Service Core Logic
-# Handles Kafka I/O and pose estimation coordination
-
-# TODO: Implement RTMPoseService class:
-# - Kafka consumer setup for YOLOX detections
-# - Kafka producer setup for pose keypoints
-# - Multi-person pose estimation pipeline
-# - Bounding box preprocessing and validation
-# - Keypoint post-processing and filtering
-
-# TODO: Integrate with core.models.rtmpose_model
-# TODO: Add support for different pose models (17/133 keypoints)
-# TODO: Implement efficient batch processing for multiple persons 
+#!/usr/bin/env python3
 """
-RTMPose Service implementation for Kafka-based video processing pipeline.
-Requires frame synchronization between raw frames and YOLOX detections.
+RTMPose service using contanos framework for Kafka I/O and pose estimation.
+Updated to use contanos framework with dynamic task_id support.
 """
+import argparse
 import asyncio
 import logging
-import json
-import numpy as np
-from typing import Dict, Any, Optional
-import yaml
 import os
 import sys
-from collections import defaultdict
-import time
+from typing import Dict, Any
 
-# Add parent directories to path
+import yaml
+
+# Add parent directories to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
-from core.models.rtmpose_model import RTMPoseModel
-from core.utils.kafka_io import KafkaMessageConsumer, KafkaMessageProducer
-from core.utils.serializers import decode_image_message, encode_pose_message
+from contanos.base_service import BaseService
+from contanos.helpers.create_a_processor import create_a_processor
+from contanos.io.kafka_input_interface import KafkaInput
+from contanos.io.kafka_output_interface import KafkaOutput
+from contanos.utils.setup_logging import setup_logging
+from contanos.utils.yaml_config_loader import ConfigLoader
+
+# Import RTMPoseWorker with error handling for different execution contexts
+try:
+    from .rtmpose_worker import RTMPoseWorker
+except ImportError:
+    # If relative import fails, try absolute import
+    try:
+        from rtmpose_worker import RTMPoseWorker
+    except ImportError:
+        from apps.rtmpose_service.rtmpose_worker import RTMPoseWorker
 
 logger = logging.getLogger(__name__)
 
 
-class FrameSynchronizer:
-    """Synchronizes raw frames with detection results."""
-
-    def __init__(self, sync_timeout_ms: int = 5000):
-        self.sync_timeout_ms = sync_timeout_ms
-        self.frame_data = defaultdict(dict)  # task_id -> {frame_id -> {frame: ..., detections: ...}}
-        self.last_cleanup = time.time()
-
-    def add_frame(self, task_id: str, frame_id: int, frame_data: Dict):
-        """Add raw frame data."""
-        if task_id not in self.frame_data:
-            self.frame_data[task_id] = {}
-
-        if frame_id not in self.frame_data[task_id]:
-            self.frame_data[task_id][frame_id] = {}
-
-        self.frame_data[task_id][frame_id]['frame'] = frame_data
-        self.frame_data[task_id][frame_id]['frame_timestamp'] = time.time()
-
-    def add_detections(self, task_id: str, frame_id: int, detections_data: Dict):
-        """Add detection results."""
-        if task_id not in self.frame_data:
-            self.frame_data[task_id] = {}
-
-        if frame_id not in self.frame_data[task_id]:
-            self.frame_data[task_id][frame_id] = {}
-
-        self.frame_data[task_id][frame_id]['detections'] = detections_data
-        self.frame_data[task_id][frame_id]['detections_timestamp'] = time.time()
-
-    def get_synchronized_data(self, task_id: str, frame_id: int) -> Optional[Dict]:
-        """Get synchronized frame and detection data."""
-        if (task_id in self.frame_data and
-                frame_id in self.frame_data[task_id] and
-                'frame' in self.frame_data[task_id][frame_id] and
-                'detections' in self.frame_data[task_id][frame_id]):
-
-            data = self.frame_data[task_id][frame_id]
-
-            # Check if data is not too old
-            current_time = time.time()
-            frame_age = (current_time - data.get('frame_timestamp', 0)) * 1000
-            det_age = (current_time - data.get('detections_timestamp', 0)) * 1000
-
-            if frame_age < self.sync_timeout_ms and det_age < self.sync_timeout_ms:
-                # Clean up used data
-                del self.frame_data[task_id][frame_id]
-                return {
-                    'frame': data['frame'],
-                    'detections': data['detections']
-                }
-
-        return None
-
-    def cleanup_old_data(self):
-        """Clean up old unsynchronized data."""
-        current_time = time.time()
-
-        # Only cleanup every 10 seconds
-        if current_time - self.last_cleanup < 10:
-            return
-
-        tasks_to_remove = []
-        for task_id in self.frame_data:
-            frames_to_remove = []
-
-            for frame_id in self.frame_data[task_id]:
-                frame_data = self.frame_data[task_id][frame_id]
-
-                # Check if any timestamp is too old
-                old_frame = False
-                old_det = False
-
-                if 'frame_timestamp' in frame_data:
-                    frame_age = (current_time - frame_data['frame_timestamp']) * 1000
-                    old_frame = frame_age > self.sync_timeout_ms
-
-                if 'detections_timestamp' in frame_data:
-                    det_age = (current_time - frame_data['detections_timestamp']) * 1000
-                    old_det = det_age > self.sync_timeout_ms
-
-                if old_frame or old_det:
-                    frames_to_remove.append(frame_id)
-
-            # Remove old frames
-            for frame_id in frames_to_remove:
-                del self.frame_data[task_id][frame_id]
-
-            # Remove empty tasks
-            if not self.frame_data[task_id]:
-                tasks_to_remove.append(task_id)
-
-        # Remove empty tasks
-        for task_id in tasks_to_remove:
-            del self.frame_data[task_id]
-
-        self.last_cleanup = current_time
-
-
 class RTMPoseService:
-    """RTMPose pose estimation service with Kafka integration."""
+    """RTMPose pose estimation service using contanos framework with dynamic task support."""
 
-    def __init__(self, config_path: str = "config.yaml"):
-        self.config = self._load_config(config_path)
+    def __init__(self, task_id: str, config_path: str = "apps/dev_pose_estimation_config.yaml"):
+        self.task_id = task_id
+        self.config_path = config_path
+        
+        # Load configuration
+        self.config_loader = ConfigLoader(config_path)
+        self.config = self.config_loader.config
+        
+        # Initialize interfaces
+        self.input_interface = None
+        self.output_interface = None
 
-        # Initialize model
-        model_config = self.config['model']
-        self.model = RTMPoseModel(model_config)
+    def _substitute_task_id(self, config_str: str) -> str:
+        """Substitute {task_id} placeholder in configuration strings."""
+        return config_str.replace('{task_id}', self.task_id)
 
-        # Initialize Kafka components
-        kafka_config = self.config['kafka']
-        self.producer = KafkaMessageProducer(
-            bootstrap_servers=kafka_config['bootstrap_servers']
-        )
+    def _parse_kafka_config_string(self, config_str: str) -> Dict[str, Any]:
+        """Parse Kafka configuration string into dict."""
+        from contanos.utils.parse_config_string import parse_config_string
+        return parse_config_string(config_str)
 
-        # Frame synchronization
-        sync_timeout = self.config['processing'].get('sync_timeout_ms', 5000)
-        self.synchronizer = FrameSynchronizer(sync_timeout)
+    def _get_devices(self) -> list:
+        """Get devices from configuration."""
+        rtmpose_config = self.config.get('rtmpose', {})
+        devices_config = rtmpose_config.get('devices', 'cuda')
+        
+        if isinstance(devices_config, str):
+            if devices_config == 'cuda':
+                # Auto-detect CUDA devices
+                import torch
+                if torch.cuda.is_available():
+                    return [f'cuda:{i}' for i in range(torch.cuda.device_count())]
+                else:
+                    return ['cpu']
+            elif devices_config == 'cpu':
+                return ['cpu']
+            else:
+                return [devices_config]
+        elif isinstance(devices_config, list):
+            return devices_config
+        else:
+            return ['cpu']
 
-        # Consumer management
-        self.consumers = {}
-        self.active_tasks = set()
+    def _get_model_config(self) -> Dict[str, Any]:
+        """Get model configuration for RTMPose."""
+        rtmpose_config = self.config.get('rtmpose', {})
+        
+        model_config = {
+            'model_path': rtmpose_config.get('model_path'),
+            'model_url': rtmpose_config.get('model_url'),
+            'backend': rtmpose_config.get('backend', 'onnxruntime'),
+            'device': 'cuda',  # Will be overridden per worker
+        }
+        
+        # Add model-specific parameters
+        if 'model' in rtmpose_config:
+            model_config.update(rtmpose_config['model'])
+            
+        return model_config
 
-        logger.info("RTMPose Service initialized")
-        logger.info(f"Model info: {self.model.get_model_info()}")
+    def _get_kafka_input_config(self) -> Dict[str, Any]:
+        """Get Kafka input configuration from RTMPose service config."""
+        rtmpose_config = self.config.get('rtmpose', {})
+        input_config_str = rtmpose_config.get('input', {}).get('config', '')
 
-    def _load_config(self, config_path: str) -> Dict[str, Any]:
-        """Load configuration from YAML file."""
-        config_file = os.path.join(os.path.dirname(__file__), config_path)
+        # Substitute task_id
+        input_config_str = self._substitute_task_id(input_config_str)
 
-        try:
-            with open(config_file, 'r') as f:
-                config = yaml.safe_load(f)
-            logger.info(f"Loaded configuration from {config_file}")
-            return config
-        except Exception as e:
-            logger.error(f"Failed to load config from {config_file}: {e}")
-            raise
+        # Parse Kafka config string
+        kafka_config = self._parse_kafka_config_string(input_config_str)
+
+        # Add default consumer settings from global Kafka config
+        global_kafka = self.config.get('kafka', {})
+        consumer_settings = global_kafka.get('consumer', {})
+
+        # Merge configurations
+        config = {
+            'bootstrap_servers': kafka_config.get('bootstrap_servers'),
+            'topic': kafka_config.get('topic'),
+            'group_id': kafka_config.get('group_id'),
+            'auto_offset_reset': consumer_settings.get('auto_offset_reset', 'latest'),
+            'max_poll_records': consumer_settings.get('max_poll_records', 1),
+            'consumer_timeout_ms': consumer_settings.get('consumer_timeout_ms', 1000),
+            'enable_auto_commit': consumer_settings.get('enable_auto_commit', True)
+        }
+
+        return config
+
+    def _get_kafka_output_config(self) -> Dict[str, Any]:
+        """Get Kafka output configuration from RTMPose service config."""
+        rtmpose_config = self.config.get('rtmpose', {})
+        output_config_str = rtmpose_config.get('output', {}).get('config', '')
+
+        # Substitute task_id
+        output_config_str = self._substitute_task_id(output_config_str)
+
+        # Parse Kafka config string
+        kafka_config = self._parse_kafka_config_string(output_config_str)
+
+        # Add default producer settings from global Kafka config
+        global_kafka = self.config.get('kafka', {})
+        producer_settings = global_kafka.get('producer', {})
+
+        # Merge configurations
+        config = {
+            'bootstrap_servers': kafka_config.get('bootstrap_servers'),
+            'topic': kafka_config.get('topic'),
+            'acks': kafka_config.get('acks', producer_settings.get('acks', 'all')),
+            'retries': kafka_config.get('retries', producer_settings.get('retries', 3)),
+            'batch_size': producer_settings.get('batch_size', 16384),
+            'linger_ms': producer_settings.get('linger_ms', 10),
+            'buffer_memory': producer_settings.get('buffer_memory', 33554432),
+            'compression_type': kafka_config.get('compression_type', producer_settings.get('compression_type', 'gzip'))
+        }
+
+        return config
+
+    def _get_processing_config(self) -> Dict[str, Any]:
+        """Get processing configuration."""
+        global_config = self.config.get('global', {})
+
+        return {
+            'workers_per_device': global_config.get('num_workers_per_device', 1),
+            'health_check_interval': 5.0,
+            'max_restart_attempts': 3,
+            'restart_cooldown': 30.0
+        }
 
     async def start_service(self):
-        """Start the RTMPose service."""
-        logger.info("Starting RTMPose service...")
-
+        """Start the RTMPose service using contanos framework."""
         try:
-            # Start cleanup task
-            _ = asyncio.create_task(self._periodic_cleanup())
+            # Setup logging
+            global_config = self.config.get('global', {})
+            log_level = global_config.get('log_level', 'INFO')
+            setup_logging(log_level)
+            logger.info(f"Starting RTMPose service with contanos framework for task: {self.task_id}")
 
-            # Start task discovery
-            await self._discover_and_process_tasks()
+            # Get input/output configurations
+            input_config = self._get_kafka_input_config()
+            output_config = self._get_kafka_output_config()
 
-        except KeyboardInterrupt:
-            logger.info("Service interrupted by user")
+            logger.info(f"Input topic: {input_config.get('topic')}")
+            logger.info(f"Output topic: {output_config.get('topic')}")
+            logger.info(f"Consumer group: {input_config.get('group_id')}")
+
+            # Initialize interfaces
+            self.input_interface = KafkaInput(config=input_config)
+            self.output_interface = KafkaOutput(config=output_config)
+
+            await self.input_interface.initialize()
+            await self.output_interface.initialize()
+
+            # Get devices and model configuration
+            devices = self._get_devices()
+            model_config = self._get_model_config()
+            processing_config = self._get_processing_config()
+
+            logger.info(f"Using devices: {devices}")
+            logger.info(f"Model config: {model_config}")
+
+            # Create workers and processor
+            workers, processor = create_a_processor(
+                worker_class=RTMPoseWorker,
+                model_config=model_config,
+                devices=devices,
+                input_interface=self.input_interface,
+                output_interface=self.output_interface,
+                num_workers_per_device=processing_config['workers_per_device']
+            )
+
+            # Start service with monitoring
+            service = BaseService(
+                processor=processor,
+                health_check_interval=processing_config['health_check_interval'],
+                max_restart_attempts=processing_config['max_restart_attempts'],
+                restart_cooldown=processing_config['restart_cooldown']
+            )
+
+            # Run the service
+            async with service:
+                await processor.start()
+                logger.info("RTMPose service started successfully")
+                await processor.wait_for_completion()
+
         except Exception as e:
-            logger.error(f"Service error: {e}")
+            logger.error(f"Failed to start RTMPose service: {e}")
             raise
         finally:
-            await self._cleanup()
-
-    async def _discover_and_process_tasks(self):
-        """Discover new tasks and start processing them."""
-        from kafka.admin import KafkaAdminClient
-        from kafka.errors import KafkaError
-
-        admin_client = KafkaAdminClient(
-            bootstrap_servers=self.config['kafka']['bootstrap_servers']
-        )
-
-        while True:
-            try:
-                # List all topics
-                topic_metadata = admin_client.list_topics()
-
-                # Find yolox_* topics (our input)
-                detection_topics = [
-                    topic for topic in topic_metadata
-                    if topic.startswith('yolox_')
-                ]
-
-                # Start processing new tasks
-                for topic in detection_topics:
-                    task_id = topic.replace('yolox_', '')
-
-                    if task_id not in self.active_tasks:
-                        logger.info(f"Discovered new task: {task_id}")
-                        await self._start_task_processing(task_id)
-
-                # Sleep before next discovery
-                await asyncio.sleep(5)
-
-            except KafkaError as e:
-                logger.error(f"Kafka error during task discovery: {e}")
-                await asyncio.sleep(10)
-            except Exception as e:
-                logger.error(f"Error during task discovery: {e}")
-                await asyncio.sleep(10)
-
-    async def _start_task_processing(self, task_id: str):
-        """Start processing a specific task."""
-        detection_topic = f"yolox_{task_id}"
-        frame_topic = f"raw_frames_{task_id}"
-        output_topic = f"rtmpose_{task_id}"
-
-        try:
-            # Create consumers for detections and frames
-            detection_consumer = KafkaMessageConsumer(
-                topics=[detection_topic],
-                group_id=f"{self.config['kafka']['group_id']}_det_{task_id}",
-                bootstrap_servers=self.config['kafka']['bootstrap_servers'],
-                auto_offset_reset=self.config['kafka']['auto_offset_reset']
-            )
-
-            frame_consumer = KafkaMessageConsumer(
-                topics=[frame_topic],
-                group_id=f"{self.config['kafka']['group_id']}_frame_{task_id}",
-                bootstrap_servers=self.config['kafka']['bootstrap_servers'],
-                auto_offset_reset=self.config['kafka']['auto_offset_reset']
-            )
-
-            self.consumers[f"{task_id}_det"] = detection_consumer
-            self.consumers[f"{task_id}_frame"] = frame_consumer
-            self.active_tasks.add(task_id)
-
-            logger.info(f"Started processing task {task_id}")
-
-            # Start processing in background
-            asyncio.create_task(
-                self._process_detections(task_id, detection_consumer, output_topic)
-            )
-            asyncio.create_task(
-                self._process_frames(task_id, frame_consumer)
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to start task processing for {task_id}: {e}")
-
-    async def _process_detections(self, task_id: str, consumer: KafkaMessageConsumer, output_topic: str):
-        """Process detection messages and synchronize with frames."""
-
-        def process_detection_message(message: Dict):
-            """Process a detection message."""
-            try:
-                frame_id = message['frame_id']
-
-                # Add detections to synchronizer
-                self.synchronizer.add_detections(task_id, frame_id, message)
-
-                # Try to get synchronized data
-                sync_data = self.synchronizer.get_synchronized_data(task_id, frame_id)
-
-                if sync_data:
-                    # Process synchronized frame + detections
-                    self._process_synchronized_data(sync_data, output_topic)
-
-            except Exception as e:
-                logger.error(f"Error processing detection message for task {task_id}: {e}")
-
-        def error_handler(error: Exception):
-            """Handle processing errors."""
-            logger.error(f"Detection consumer error for task {task_id}: {error}")
-
-        # Start consuming detection messages
-        try:
-            consumer.consume_messages(process_detection_message, error_handler)
-        except Exception as e:
-            logger.error(f"Error in detection consumption for task {task_id}: {e}")
-
-    async def _process_frames(self, task_id: str, consumer: KafkaMessageConsumer):
-        """Process frame messages for synchronization."""
-
-        def process_frame_message(message: Dict):
-            """Process a frame message."""
-            try:
-                frame_id = message['frame_id']
-
-                # Add frame to synchronizer
-                self.synchronizer.add_frame(task_id, frame_id, message)
-
-            except Exception as e:
-                logger.error(f"Error processing frame message for task {task_id}: {e}")
-
-        def error_handler(error: Exception):
-            """Handle processing errors."""
-            logger.error(f"Frame consumer error for task {task_id}: {error}")
-
-        # Start consuming frame messages
-        try:
-            consumer.consume_messages(process_frame_message, error_handler)
-        except Exception as e:
-            logger.error(f"Error in frame consumption for task {task_id}: {e}")
-
-    def _process_synchronized_data(self, sync_data: Dict, output_topic: str):
-        """Process synchronized frame and detection data."""
-        try:
-            frame_data = sync_data['frame']
-            detection_data = sync_data['detections']
-
-            # Decode image from frame data
-            image = decode_image_message(frame_data)
-
-            # Prepare input for RTMPose model
-            input_data = {
-                'task_id': frame_data['task_id'],
-                'frame_id': frame_data['frame_id'],
-                'timestamp': frame_data['timestamp'],
-                'image': image,
-                'additional_data': {
-                    'detections': detection_data.get('result', [])
-                }
-            }
-
-            # Run RTMPose estimation
-            result = self.model.predict(input_data)
-
-            # Encode and send result
-            pose_message = encode_pose_message(result)
-            success = self.producer.send_message(output_topic, pose_message)
-
-            if success:
-                logger.debug(f"Processed pose estimation for frame {frame_data['frame_id']}")
-            else:
-                logger.error(f"Failed to send pose result for frame {frame_data['frame_id']}")
-
-        except Exception as e:
-            logger.error(f"Error processing synchronized data: {e}")
-
-    async def _periodic_cleanup(self):
-        """Periodically clean up old data."""
-        while True:
-            try:
-                self.synchronizer.cleanup_old_data()
-                await asyncio.sleep(10)  # Cleanup every 10 seconds
-            except Exception as e:
-                logger.error(f"Error during cleanup: {e}")
-                await asyncio.sleep(10)
-
-    async def _cleanup(self):
-        """Cleanup all resources."""
-        logger.info("Cleaning up RTMPose service...")
-
-        # Close all consumers
-        for consumer in self.consumers.values():
-            consumer.close()
-
-        # Close producer
-        self.producer.close()
-
-        logger.info("RTMPose service cleanup complete")
+            # Cleanup
+            if self.input_interface:
+                await self.input_interface.cleanup()
+            if self.output_interface:
+                await self.output_interface.cleanup()
 
 
 async def main():
-    """Main function to run the RTMPose service."""
-    import argparse
-
-    parser = argparse.ArgumentParser(description="RTMPose Estimation Service")
-    parser.add_argument('--config', type=str, default='config.yaml',
-                        help='Configuration file path')
+    """Main entry point for RTMPose service."""
+    parser = argparse.ArgumentParser(description='RTMPose Service with Contanos Framework')
+    parser.add_argument('--task_id', type=str, required=True,
+                        help='Task ID for processing pipeline')
+    parser.add_argument('--config', type=str, 
+                        default='apps/dev_pose_estimation_config.yaml',
+                        help='Path to configuration file')
+    
     args = parser.parse_args()
-
-    # Setup logging
-    logging.basicConfig(level=logging.INFO)
-
+    
     # Create and start service
-    service = RTMPoseService(args.config)
+    service = RTMPoseService(task_id=args.task_id, config_path=args.config)
     await service.start_service()
 
 

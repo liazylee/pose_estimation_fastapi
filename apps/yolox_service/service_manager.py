@@ -223,7 +223,7 @@ class ServiceManager:
                                 "error_message": f"Service failed after {max_restarts} restart attempts: {error_msg}"
                             })
                             logger.error(f"Service {task_id} failed after {max_restarts} restart attempts")
-                            break
+                            await self.stop_service(task_id)
                         else:
                             logger.warning(f"Restarting service {task_id} (attempt {restart_count}/{max_restarts})")
                             # Wait before restarting
@@ -339,7 +339,7 @@ class ServiceManager:
         }
 
 
-# 单例模式
+# singleton instance of ServiceManager
 _service_manager = None
 
 

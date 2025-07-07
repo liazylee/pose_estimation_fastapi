@@ -3,11 +3,11 @@
 YOLOX Detection Worker using contanos framework.
 """
 import logging
-from typing import Any, Dict
+from typing import Dict, Optional
 
-import numpy as np
 from rtmlib.tools.object_detection import YOLOX as YOLOXModel
 
+from contanos import deserialize_image_from_kafka
 from contanos.base_worker import BaseWorker
 
 
@@ -45,79 +45,40 @@ class YOLOXWorker(BaseWorker):
             logging.error(f"Failed to initialize YOLOX model for worker {self.worker_id}: {e}")
             raise
 
-    def _predict(self, inputs: Any, metadata: Any = None) -> Any:
+    def _predict(self, inputs: Dict) -> Optional[Dict]:
         """Run YOLOX detection on input frame."""
         try:
-            # Ensure input is numpy array
-            if not isinstance(inputs, np.ndarray):
-                logging.error(f"Worker {self.worker_id}: Expected numpy array, got {type(inputs)}")
+            frame = inputs.get('image_bytes')
+            if frame is None:
+                logging.error(f"Worker {self.worker_id} received empty input frame")
                 return None
 
+            deserializer_frame = deserialize_image_from_kafka(frame)
             # Run model inference
-            model_output = self.model(inputs)
-
-            # Handle different output formats
-            if isinstance(model_output, tuple):
-                bboxes, det_scores = model_output
-                classes = [-1] * len(det_scores)  # Default class for all detections
-            elif isinstance(model_output, dict):
-                bboxes = model_output.get('bboxes', [])
-                det_scores = model_output.get('scores', [])
-                classes = model_output.get('classes', [-1] * len(det_scores))
-            else:
-                # Model returns only bboxes
-                bboxes = model_output
-                det_scores = np.ones(len(bboxes)) if len(bboxes) > 0 else []
-                classes = [-1] * len(det_scores)
-
-            # Apply confidence threshold if configured
-            conf_threshold = self.model_config.get('confidence_threshold', 0.5)  # Lower threshold for testing
-            if conf_threshold > 0 and len(det_scores) > 0:
-                valid_indices = np.array(det_scores) >= conf_threshold
-                bboxes = np.array(bboxes)[valid_indices] if len(bboxes) > 0 else []
-                det_scores = np.array(det_scores)[valid_indices]
-                classes = np.array(classes)[valid_indices]
-
-            # Convert to lists for JSON serialization
-            if isinstance(bboxes, np.ndarray):
-                bboxes = bboxes.tolist()
-            if isinstance(det_scores, np.ndarray):
-                det_scores = det_scores.tolist()
-            if isinstance(classes, np.ndarray):
-                classes = classes.tolist()
-
-            # Format detections according to system message schema
+            model_output = self.model(deserializer_frame)
+            # output :[[  1.7640184   2.6469145 212.87782   337.55084  ]]
+            if model_output is None or len(model_output) == 0:
+                logging.warning(f"Worker {self.worker_id} received empty model output")
+                return None
+            # Convert model output to detection format
             detections = []
-            for i in range(len(det_scores)):
-                bbox = bboxes[i] if i < len(bboxes) else [0, 0, 0, 0]
-                confidence = det_scores[i] if i < len(det_scores) else 0.0
-                class_id = classes[i] if i < len(classes) else -1
-
-                detection = {
-                    "bbox": bbox,  # [x1, y1, x2, y2] format
-                    "confidence": float(confidence),
-                    "class_id": int(class_id),
-                    "class_name": "person"  # YOLOX human art model focuses on person detection
-                }
-                detections.append(detection)
-
-            # Create result in the expected format
+            for bbox in model_output:
+                if hasattr(bbox, 'tolist'):
+                    bbox = bbox.tolist()
+                if len(bbox) < 4:
+                    logging.warning(f"Worker {self.worker_id} received invalid bounding box: {bbox}")
+                    continue
+                x1, y1, x2, y2 = bbox[:4]
+                detections.append({
+                    'bbox': [x1, y1, x2, y2],
+                    'class_name': 'person'  # Assuming the model is focused on person detection
+                })
             result = {
                 'detections': detections,
                 'detection_count': len(detections),
-                'model_info': {
-                    'model_type': 'yolox',
-                    'input_size': self.model_config.get('model_input_size', [640, 640]),
-                    'confidence_threshold': conf_threshold
-                },
-                'processing_info': {
-                    'worker_id': self.worker_id,
-                    'device': self.device
-                }
+                'frame_id': inputs.get('frame_id', None),
+
             }
-            logging.info(f"YOLOXWorker {self.worker_id} detection result: {len(result)}")
-            logging.info(
-                f"Worker {self.worker_id} detected {len(detections)} objects with confidence >= {conf_threshold}")
             return result
 
         except Exception as e:

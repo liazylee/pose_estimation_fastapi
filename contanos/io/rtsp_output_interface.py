@@ -1,13 +1,12 @@
-import functools
-from typing import Any, Dict
-import logging
 import asyncio
+import functools
+import logging
 import subprocess
+from abc import ABC
+from typing import Any, Dict
 
 import cv2
 import numpy as np
-
-from abc import ABC
 
 
 class RTSPOutput(ABC):
@@ -82,13 +81,13 @@ class RTSPOutput(ABC):
         except Exception as e:
             logging.error(f"Failed to initialize RTSP output: {e}")
             return False
+
     async def _get_frames_dimensions(self):
         """
         Get the dimensions of the frames from the input interface.
         """
         frame_np = await self.queue.get()
         return frame_np.shape[:2]
-
 
     #
     # ────────────────────────────────  PRODUCER  ────────────────────────────────
@@ -112,6 +111,7 @@ class RTSPOutput(ABC):
                 if frame_np.shape[:2] != (self.height, self.width):
                     # Resize or log a warning if dimensions don't match
                     frame_np = cv2.resize(frame_np, (self.width, self.height), interpolation=cv2.INTER_LINEAR)
+
                 async def run_in_thread(func, *args, **kwargs):
                     loop = asyncio.get_running_loop()
                     return await loop.run_in_executor(None, functools.partial(func, *args, **kwargs))
@@ -152,7 +152,7 @@ class RTSPOutput(ABC):
             raise RuntimeError("RTSP output not initialized")
 
         try:
-            frame_np = results['results']['img']
+            frame_np = results['results']['annotated_frame']
             await self.queue.put(frame_np)
             return True
         except Exception as e:

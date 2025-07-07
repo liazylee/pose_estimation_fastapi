@@ -5,20 +5,22 @@ import logging
 import os
 import shutil
 import uuid
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Optional
 
+import uvicorn
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .ai_service_client import AIServiceOrchestrator
-from .kafka_controller import KafkaController
-from .schemas import TaskResponse, TaskStatus, AIPipelineStartRequest
-from .tasks import process_video_task
-from .video_utils import RTSPStreamManager
+from ai_service_client import AIServiceOrchestrator
+from kafka_controller import KafkaController
+from schemas import TaskResponse, TaskStatus, AIPipelineStartRequest
+from tasks import process_video_task
+from video_utils import RTSPStreamManager
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -60,20 +62,18 @@ rtsp_manager = RTSPStreamManager()
 ai_orchestrator = AIServiceOrchestrator()
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize services on startup."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     logger.info("Starting AI Video Analysis Platform...")
-    # Check AI services connectivity
+    # 检查AI服务健康
     health = await ai_orchestrator.health_check()
     logger.info(f"AI Services health check: {health}")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown."""
+    yield
     logger.info("Shutting down AI Video Analysis Platform...")
     kafka_controller.close()
+
+
+app.router.lifespan_context = lifespan
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -221,9 +221,10 @@ async def upload_video(
         progress=0,
         created_at=datetime.utcnow(),
         input_file=str(file_path),
-        output_file=None
+        output_file=None,
+        error=None
     )
-
+    rtsp_url: Optional[str] = None
     # Create RTSP stream from the uploaded video
     try:
         stream_url = rtsp_manager.create_stream_from_video(task_id, str(file_path))
@@ -576,7 +577,16 @@ async def stop_yolox_service(task_id: str):
 
 
 if __name__ == "__main__":
-    import uvicorn
+    import argparse
 
-    # Run the FastAPI app with Uvicorn
-    uvicorn.run(app, host="localhost", port=8000, reload=True)
+    parser = argparse.ArgumentParser(description="AI Analysis controller backend")
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind to")
+    parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
+    args = parser.parse_args()
+    uvicorn.run(
+        "main:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload
+    )

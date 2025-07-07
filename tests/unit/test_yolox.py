@@ -1,75 +1,73 @@
 #!/usr/bin/env python3
 """
-Test script for YOLOX model implementation.
+Unit tests for YOLOX model.
 """
-import numpy as np
-
-import logging
+import unittest
 import sys
 import os
+import numpy as np
 
-# Add path for imports
-sys.path.insert(0, os.path.abspath('.'))
+# Add paths for testing
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
-from core.models.yolox_model import YOLOXModel
-
-# Setup logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from contanos.models.yolox_model import YOLOXModel
 
 
-def test_yolox_model():
-    """Test YOLOX model with a sample image."""
+class TestYOLOXModel(unittest.TestCase):
+    """Test YOLOX model functionality."""
 
-    # Model configuration
-    config = {
-        'model_path': 'https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/yolox_m_8xb8-300e_humanart-c2c7a14a.zip',
-        'model_input_size': [640, 640],
-        'confidence_threshold': 0.5,
-        'nms_threshold': 0.45,
-        'device': 'cpu',  # Use CPU for testing
-        'backend': 'onnxruntime'
-    }
-
-    try:
-        # Initialize model
-        logger.info("Initializing YOLOX model...")
-        model = YOLOXModel(config)
-        logger.info("Model initialized successfully")
-
-        # Print model info
-        model_info = model.get_model_info()
-        logger.info(f"Model info: {model_info}")
-
-        # Create test image (640x480 random image)
-        test_image = np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
-
-        # Prepare input data
-        input_data = {
-            'task_id': 'test_task_123',
-            'frame_id': 1,
-            'timestamp': '2025-01-20T10:00:00Z',
-            'image': test_image
+    def setUp(self):
+        """Set up test fixtures."""
+        self.config = {
+            'device': 'cpu',
+            'model_path': 'test_model.onnx',
+            'backend': 'onnxruntime'
         }
 
-        # Run prediction
-        logger.info("Running prediction...")
-        result = model.predict(input_data)
+    def test_model_initialization(self):
+        """Test model initialization."""
+        try:
+            model = YOLOXModel(self.config)
+            self.assertIsNotNone(model)
+            self.assertEqual(model.device, 'cpu')
+        except ImportError:
+            # Skip test if rtmlib not available
+            self.skipTest("rtmlib not available")
 
-        logger.info(f"Prediction result: {result}")
-        logger.info(f"Number of detections: {len(result.get('result', []))}")
+    def test_model_info(self):
+        """Test model info retrieval."""
+        try:
+            model = YOLOXModel(self.config)
+            info = model.get_model_info()
+            self.assertIn('model_type', info)
+            self.assertEqual(info['model_type'], 'YOLOX')
+        except ImportError:
+            self.skipTest("rtmlib not available")
 
-        return True
+    def test_predict_format(self):
+        """Test prediction output format."""
+        try:
+            model = YOLOXModel(self.config)
+            
+            # Create dummy input
+            input_data = {
+                'task_id': 'test_task',
+                'frame_id': 1,
+                'timestamp': '2024-01-01T00:00:00Z',
+                'image': np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
+            }
+            
+            result = model.predict(input_data)
+            
+            # Check result format
+            self.assertIn('task_id', result)
+            self.assertIn('frame_id', result)
+            self.assertIn('timestamp', result)
+            self.assertIn('result', result)
+            
+        except ImportError:
+            self.skipTest("rtmlib not available")
 
-    except Exception as e:
-        logger.error(f"Test failed: {e}")
-        return False
 
-
-if __name__ == "__main__":
-    success = test_yolox_model()
-    if success:
-        logger.info("✅ YOLOX model test passed!")
-    else:
-        logger.error("❌ YOLOX model test failed!")
-        sys.exit(1)
+if __name__ == '__main__':
+    unittest.main()

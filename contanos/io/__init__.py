@@ -1,6 +1,7 @@
 # Input interfaces
 from .kafka_input_interface import KafkaInput
 from .kafka_output_interface import KafkaOutput
+from .kafka_topic_manager import KafkaTopicManager
 from .multi_input_interface import MultiInputInterface
 from .rtsp_input_interface import RTSPInput
 # Output interfaces
@@ -13,5 +14,7 @@ __all__ = [
     'MultiInputInterface',
     # Output interfaces
     'RTSPOutput',
-    'KafkaOutput'
+    'KafkaOutput',
+    # Topic management
+    'KafkaTopicManager'
 ]

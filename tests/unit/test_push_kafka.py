@@ -19,7 +19,7 @@ from kafka.errors import TopicAlreadyExistsError
 # Add parent directories to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
-from core.utils.serializers import serialize_image_for_kafka
+from contanos.utils.serializers import serialize_image_for_kafka
 from apps.yolox_service.service import YOLOXService
 
 # Configure logging
