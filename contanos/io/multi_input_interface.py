@@ -1,23 +1,26 @@
-from typing import Any, Dict, Tuple, List
 import asyncio
 import logging
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, List, Dict
+
 
 class MultiInputInterface:
     """Wrapper for multiple input interfaces with synchronized multi-entry queue."""
-    
-    def __init__(self, interfaces: List[Any]):
+
+    def __init__(self, interfaces: List[Any], frame_timeout_sec: float = 5.0):
         self.interfaces = interfaces
         self.is_running = False
         self._executor = ThreadPoolExecutor(max_workers=len(interfaces))
         self._producer_tasks = []
-        self._data_dict = defaultdict(lambda: {})  # {frame_id_str: {interface_idx: (data, metadata)}}
-        self._queue = asyncio.Queue(maxsize=1000)  # Stores completed {interface_idx: (data, metadata)}
+        self._data_dict = defaultdict(lambda: {})  # {frame_id: {interface_idx: data}}
+        self._queue = asyncio.Queue(maxsize=1000)  # Stores completed {interface_idx: data}
+        self._frame_timestamp_dict = {}
         self._lock = asyncio.Lock()  # Protects _data_dict and _queue
         self._num_interfaces = len(interfaces)
         self.max_pending_frames = 1000
-        self._frame_id_order = []  # 存储 frame_id_str 顺序
+        self._frame_id_order = []  #
+        self.frame_timeout_sec = frame_timeout_sec
 
     async def initialize(self) -> bool:
         """Initialize all input interfaces and start producers."""
@@ -30,36 +33,39 @@ class MultiInputInterface:
             if not all(results):
                 logging.error("One or more interfaces failed to initialize")
                 return False
-            
+
             self.is_running = True
             # Start producer tasks for each interface
             for idx, interface in enumerate(self.interfaces):
                 task = asyncio.create_task(self._interface_producer(idx, interface))
                 self._producer_tasks.append(task)
-            
+
             logging.info("MultiInputInterface initialized successfully")
             return True
-            
+
         except Exception as e:
             logging.error(f"Failed to initialize MultiInputInterface: {e}")
             return False
-    
+
     async def _interface_producer(self, interface_idx, interface):
         """Background task to fetch data from an interface and update dictionary."""
         while self.is_running:
             try:
-                data, metadata = await interface.read_data()
-                frame_id_str = metadata.get('frame_id_str')
-                if frame_id_str is None:
-                    logging.warning(f"Interface {interface_idx} provided no frame_id_str, skipping")
+                data = await interface.read_data()
+                if data is None:
+                    logging.warning(f"Interface {interface_idx} returned None, skipping")
+                    continue
+                frame_id = data.get('frame_id')
+                if frame_id is None:
+                    logging.warning(f"Interface {interface_idx} provided no frame_id, skipping")
                     continue
 
                 async with self._lock:
-                    # Add new frame_id_str if not already present
-                    if frame_id_str not in self._data_dict:
-                        self._frame_id_order.append(frame_id_str)
+                    # Add new frame_id if not already present
+                    if frame_id not in self._data_dict:
+                        self._frame_id_order.append(frame_id)
 
-                    self._data_dict[frame_id_str][interface_idx] = (data, metadata)
+                    self._data_dict[frame_id][interface_idx] = data
 
                     # If buffer too large, drop oldest
                     if len(self._frame_id_order) > self.max_pending_frames:
@@ -69,42 +75,50 @@ class MultiInputInterface:
                             logging.warning(f"Dropped frame {old_frame_id} due to pending overflow")
 
                     # If this frame is now complete
-                    if len(self._data_dict[frame_id_str]) == self._num_interfaces:
-                        await self._queue.put(self._data_dict[frame_id_str])
-                        del self._data_dict[frame_id_str]
-                        self._frame_id_order.remove(frame_id_str)
-            
+                    if len(self._data_dict[frame_id]) == self._num_interfaces:
+                        await self._queue.put(self._data_dict[frame_id])
+                        del self._data_dict[frame_id]
+                        self._frame_id_order.remove(frame_id)
+
             except Exception as e:
                 logging.error(f"Interface {interface_idx} error: {e}")
                 await asyncio.sleep(1)  # Prevent tight loop on error
-    
-    async def read_data(self) -> Tuple[List[Any], List[Dict[str, Any]]]:
-        """Read synchronized data for a frame_id_str from the queue."""
+
+    async def read_data(self) -> Dict[str, Any]:
+        """Read synchronized data for a frame_id from the queue."""
         if not self.is_running:
             raise Exception("MultiInputInterface not initialized or stopped")
-        
+
         try:
-            # Get completed dictionary from queue
-            frame_data = await self._queue.get()
-            # Sort by interface_idx for consistent order
-            # print(f"the current frame_id_str is: {frame_data[0][1]['frame_id_str']}")
-            data_list = []
-            metadata_list = []
-            for idx in sorted(frame_data.keys()):
-                data, metadata = frame_data[idx]
-                data_list.append(data)
-                metadata_list.append(metadata)
+            frame_data = await asyncio.wait_for(self._queue.get(), timeout=self.frame_timeout_sec)
             self._queue.task_done()
-            return data_list, metadata_list
-            
+
+            merged = {}
+            for idx in sorted(frame_data.keys()):
+                part = frame_data[idx]
+                if not isinstance(part, dict):
+                    logging.warning(f"Data from interface {idx} is not a dict: {part}")
+                    continue
+                merged.update(part)  # simple merge, later keys overwrite earlier ones if conflict
+
+            return merged
+        except asyncio.TimeoutError:
+            logging.warning("Timeout waiting for synchronized data")
+            raise
         except asyncio.CancelledError:
             raise
         except Exception as e:
             raise Exception(f"Failed to read synchronized data: {e}")
-    
+
     async def cleanup(self):
         """Clean up all interfaces and resources."""
         self.is_running = False
+
+        await asyncio.gather(
+            *[interface.cleanup() for interface in self.interfaces],
+            return_exceptions=True
+        )
+
         # Cancel producer tasks
         for task in self._producer_tasks:
             task.cancel()
@@ -113,10 +127,7 @@ class MultiInputInterface:
         except asyncio.CancelledError:
             pass
         # Clean up interfaces
-        await asyncio.gather(
-            *[interface.cleanup() for interface in self.interfaces],
-            return_exceptions=True
-        )
+
         # Clear dictionary and queue
         async with self._lock:
             self._data_dict.clear()

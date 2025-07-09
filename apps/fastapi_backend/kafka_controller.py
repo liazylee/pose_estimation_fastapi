@@ -66,7 +66,7 @@ class KafkaController:
             True if successful, False otherwise
         """
         topic_configs = {
-            "retention.ms": "600000",  # 10 minutes
+            "retention.ms": "3600000",  # 1 hour
             "segment.bytes": "104857600",  # 100MB
             "cleanup.policy": "delete",
             "compression.type": "snappy",  # Efficient for JSON

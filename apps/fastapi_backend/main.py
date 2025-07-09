@@ -65,7 +65,6 @@ ai_orchestrator = AIServiceOrchestrator()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting AI Video Analysis Platform...")
-    # 检查AI服务健康
     health = await ai_orchestrator.health_check()
     logger.info(f"AI Services health check: {health}")
     yield

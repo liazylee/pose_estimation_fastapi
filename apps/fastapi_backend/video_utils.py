@@ -306,7 +306,7 @@ class RTSPStreamManager:
         if task_id in self.streams:
             process = self.streams[task_id]
             logger.info(f"正在停止任务 {task_id} 的RTSP流 (PID: {process.pid})...")
-            process.terminate()  # 发送SIGTERM
+            process.terminate()
             try:
                 process.wait(timeout=5)  # 等待进程终止
                 logger.info(f"任务 {task_id} 的流已成功终止。")

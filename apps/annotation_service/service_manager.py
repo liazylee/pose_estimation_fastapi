@@ -70,15 +70,21 @@ class ServiceManager:
                 return {
                     "success": True,
                     "message": f"Annotation service started successfully for task_id: {task_id}",
-                    "topics": {
-                        "input_frames": f"raw_frames_{task_id}",
-                        "input_detections": f"yolox_detections_{task_id}",
-                        "output_rtsp": f"rtsp://localhost:8554/outstream_{task_id}",
-                        "consumer_groups": [
-                            f"annotation_raw_{task_id}",
-                            f"annotation_det_{task_id}"
-                        ]
-                    }
+                    "outputs": {
+                        "rtsp_stream": f"rtsp://localhost:8554/outstream_{task_id}",
+                        "video_file": f"output_videos/{task_id}/annotated_{task_id}_[timestamp].mp4",
+                        "debug_frames": f"debug_frames/{task_id}/"
+                    },
+                    "inputs": {
+                        "raw_frames": f"raw_frames_{task_id}",
+                        "detections": f"yolox_detections_{task_id}",
+                        "poses": f"rtmpose_results_{task_id}"
+                    },
+                    "consumer_groups": [
+                        f"annotation_raw_{task_id}",
+                        f"annotation_track_{task_id}",
+                        f"annotation_pose_{task_id}"
+                    ]
                 }
 
             except Exception as e:
@@ -111,7 +117,7 @@ class ServiceManager:
                         self.services[task_id]["status"] = "running"
 
                 # Start the service
-                await service.start()
+                await service.start_service()
 
                 # If we reach here, service completed normally
                 async with self._lock:

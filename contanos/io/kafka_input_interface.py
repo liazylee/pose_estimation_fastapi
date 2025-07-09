@@ -37,7 +37,7 @@ class KafkaInput(ABC):
         self.enable_auto_commit = config.get('enable_auto_commit', True)
 
         # Asyncio constructs
-        self.message_queue: Queue = Queue(maxsize=config.get('message_queue_size', 100))
+        self.message_queue: Queue = Queue(maxsize=config.get('message_queue_size', 1000))
         self.consumer = KafkaConsumer()
         self._executor = ThreadPoolExecutor(max_workers=config.get('max_workers', 1),
                                             thread_name_prefix=f"kafka_{self.group_id}")
@@ -106,7 +106,6 @@ class KafkaInput(ABC):
             message = await self._loop.run_in_executor(self._executor, self._process_message, record)
             if message is not None:
                 await self.message_queue.put(message)
-                logging.debug(f"Pushed message to queue: {message.get('frame_id_str', 'unknown')}")
         except Exception as e:
             logging.error(f"Error queuing Kafka message: {e}")
 
@@ -117,49 +116,52 @@ class KafkaInput(ABC):
             message = json.loads(record.value)
             if not isinstance(message, dict):
                 raise ValueError("Kafka message must be a JSON object")
-            if message.get('frame_id_str') is None:
-                pass
         except ValueError as e:
             logging.error(f"Invalid Kafka message format: {e}")
             return None
+        except json.JSONDecodeError as e:
+            logging.error(f"Failed to decode Kafka message: {e}")
+            return None
+
+        return message
 
     async def read_data(self) -> Optional[Dict[str, Any]]:
         """Read message from queue."""
         if not self.is_running:
             raise Exception("Kafka input not initialized or stopped")
-
+        message = None
         try:
-            message = await asyncio.wait_for(self.message_queue.get(), timeout=5.0)
-
+            message = await asyncio.wait_for(self.message_queue.get(), timeout=self.consumer_timeout_ms)
+            return message
         except asyncio.TimeoutError:
             logging.warning("Timeout waiting for Kafka message")
-            return None
+            raise
         except asyncio.CancelledError:
             logging.info("Kafka input read_data task cancelled")
-            return None
+            raise
         except Exception as e:
             logging.error(f"Error reading Kafka message: {e}")
-            return None
-        return message
+            raise
+        finally:
+            if message is not None:
+                self.message_queue.task_done()
 
     async def cleanup(self):
         """Clean up Kafka resources."""
         self.is_running = False
-
+        # Stop consumer early to break poll()
+        if self.consumer:
+            try:
+                await self._loop.run_in_executor(self._executor, self.consumer.close)
+            except KafkaError as e:
+                logging.error(f"Error closing Kafka consumer: {e}")
         # Cancel consumer task
         if self._consumer_task:
             self._consumer_task.cancel()
             try:
                 await self._consumer_task
             except asyncio.CancelledError:
-                pass
-
-        # Close consumer
-        if self.consumer:
-            try:
-                await self._loop.run_in_executor(self._executor, self.consumer.close)
-            except Exception as e:
-                logging.error(f"Error closing Kafka consumer: {e}")
+                logging.info("Kafka consumer task cancelled")
 
         # Shutdown executor
         self._executor.shutdown(wait=True)

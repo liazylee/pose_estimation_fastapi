@@ -1,17 +1,19 @@
-from typing import Any, Dict, Tuple
-import logging
-import json
-import time
 import asyncio
+import json
+import logging
+import time
 import uuid
 from abc import ABC
 from asyncio import Queue
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Dict, Tuple
+
 import paho.mqtt.client as mqtt
+
 
 class MQTTInput(ABC):
     """MQTT message input implementation using asyncio.Queue and paho-mqtt."""
-    
+
     def __init__(self, config: Dict[str, Any]):
         super().__init__()
         self.addr: str = config["addr"]
@@ -25,12 +27,12 @@ class MQTTInput(ABC):
         unique_suffix = str(uuid.uuid4())[:8]  # Add unique suffix
         self.client_id = f"{base_id}_{unique_suffix}"
         self.qos = int(config.get('qos', 0))
-        
+
         # Asyncio constructs
         self.message_queue: Queue = Queue(maxsize=100)
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix=f"mqtt_{self.client_id}")
-        self._loop: asyncio.AbstractEventLoop | None = None   # ← not yet
-        
+        self._loop: asyncio.AbstractEventLoop | None = None  # ← not yet
+
         # Paho client
         self.client = mqtt.Client(client_id=self.client_id)
         if self.username:
@@ -75,7 +77,7 @@ class MQTTInput(ABC):
         message = await self._loop.run_in_executor(self._executor, self._process_message, msg)
         if message is not None:  # Only queue valid frame messages
             await self.message_queue.put(message)
-            logging.debug(f"Pushed message to queue: {message['frame_id_str']}")
+            logging.debug(f"Pushed message to queue: {message['frame_id']}")
 
     def _process_message(self, msg):
         # Blocking message processing
@@ -95,7 +97,7 @@ class MQTTInput(ABC):
             except json.JSONDecodeError:
                 payload_data = payload_str
             return {
-                'frame_id_str': payload_data['frame_id_str'],
+                'frame_id': payload_data['frame_id'],
                 'topic': msg.topic,
                 'payload': payload_data,
                 'qos': msg.qos,
@@ -104,7 +106,7 @@ class MQTTInput(ABC):
             }
         except UnicodeDecodeError:
             return {
-                'frame_id_str': msg.payload['frame_id_str'],
+                'frame_id': msg.payload['frame_id'],
                 'topic': msg.topic,
                 'payload': msg.payload,
                 'qos': msg.qos,
@@ -116,8 +118,8 @@ class MQTTInput(ABC):
         """Initialize MQTT connection and start background loop."""
         try:
 
-            self._loop = asyncio.get_running_loop()            # ← correct loop
-            self._executor = ThreadPoolExecutor(max_workers=1) # recreate after we know the loop
+            self._loop = asyncio.get_running_loop()  # ← correct loop
+            self._executor = ThreadPoolExecutor(max_workers=1)  # recreate after we know the loop
 
             logging.info(f"Starting MQTT client for broker {self.broker_host}:{self.broker_port}")
             # Start network loop in background thread
@@ -146,7 +148,7 @@ class MQTTInput(ABC):
             # message = await self.message_queue.get()
             data = message['payload']
             metadata = {
-                'frame_id_str': data.get('frame_id_str') if isinstance(data, dict) else None,
+                'frame_id': data.get('frame_id') if isinstance(data, dict) else None,
                 'topic': message['topic'],
                 'qos': message['qos'],
                 'retain': message['retain'],

@@ -4,7 +4,7 @@
 # Global configuration
 global:
   # Computing device: cuda or cpu
-  devices: "cuda"
+  devices: [ "cuda:0" ]   # ["cuda:0", "cuda:1"] for multi-GPU
   # Log level: DEBUG, INFO, WARN, ERROR
   log_level: "INFO"
   # Startup delay between services (seconds)
@@ -69,11 +69,11 @@ kafka:
 yolox:
   enabled: true
   # Model input size [width, height]
-  model_input_size: [640, 640]
+  model_input_size: [ 640, 640 ]
   # Model URL (will be downloaded automatically)
-  model_url: "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/yolox_m_8xb8-300e_humanart-c2c7a14a.zip"
+  onnx_model: "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/yolox_m_8xb8-300e_humanart-c2c7a14a.zip"
   # Device configuration
-  devices: "cuda"
+  devices: [ "cuda:0" ]
   backend: "onnxruntime"
   # Model configuration
   model:
@@ -92,11 +92,11 @@ yolox:
 rtmpose:
   enabled: true
   # Model input size [width, height]
-  model_input_size: [192, 256]
+  model_input_size: [ 192, 256 ]
   # Model URL
-  model_url: "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-m_simcc-body7_pt-body7_420e-256x192-e48f03d0_20230504.zip"
+  onnx_model: "https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/onnx_sdk/rtmpose-m_simcc-body7_pt-body7_420e-256x192-e48f03d0_20230504.zip"
   # Device configuration
-  devices: "cuda"
+  devices: [ "cuda:0" ]
   backend: "onnxruntime"
   # Input configuration (multi-input) - now using Kafka
   input:
@@ -136,14 +136,21 @@ annotation:
   enabled: true
   # Device configuration
   devices: "cpu"
+  # Debug output directory for saving debug frames
+  debug_output_dir: "debug_frames"
   # Input configuration (multi-input) - mixed Kafka and RTSP
   input:
+    consumer:
+      auto_offset_reset: "latest"
+      max_poll_records: 1
+      consumer_timeout_ms: 1000
+      enable_auto_commit: true
     raw_frames:
       type: "kafka"
       config: "kafka://localhost:9092,topic=raw_frames_{task_id},group_id=annotation_raw_{task_id}"
-    tracking:
+    yolox_detections:
       type: "kafka"
-      config: "kafka://localhost:9092,topic=bytetrack_tracking_{task_id},group_id=annotation_track_{task_id}"
+      config: "kafka://localhost:9092,topic=yolox_detections_{task_id},group_id=annotation_track_{task_id}"
     poses:
       type: "kafka"
       config: "kafka://localhost:9092,topic=rtmpose_results_{task_id},group_id=annotation_pose_{task_id}"
@@ -151,20 +158,35 @@ annotation:
   output:
     type: "rtsp"
     config: "rtsp://localhost:8554,topic=outstream_{task_id},width=1920,height=1080,fps=25"
+  # Video file output configuration (using FFmpeg)
+  video_output:
+    enabled: true
+    output_dir: "output_videos"
+    filename_template: "annotated_{task_id}_{timestamp}.mp4"
+    # Video encoding parameters
+    width: 1920
+    height: 1080
+    fps: 25
+    codec: "libx264"  # Use libx264 for better compatibility
+    preset: "fast"     # FFmpeg preset: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
+    crf: 23           # Constant Rate Factor: 0-51 (lower = better quality, 23 is good balance)
+    bitrate: "2000k"  # Target bitrate
+    pixel_format: "yuv420p"  # Standard pixel format for MP4
+    queue_max_len: 100  # Maximum frames in output queue
 
 # Service dependencies (startup order)
 service_dependencies:
   - name: "yolox"
-    depends_on: []
+    depends_on: [ ]
     description: "Object detection service, detects human bounding boxes from Kafka raw frames"
   - name: "rtmpose"
-    depends_on: ["yolox"]
+    depends_on: [ "yolox" ]
     description: "Pose estimation service, receives detection results for pose estimation"
   - name: "bytetrack"
-    depends_on: ["yolox"]
+    depends_on: [ "yolox" ]
     description: "Object tracking service, tracks detected objects"
   - name: "annotation"
-    depends_on: ["rtmpose", "bytetrack"]
+    depends_on: [ "rtmpose", "bytetrack" ]
     description: "Visualization service, aggregates all results and outputs"
 
 # Monitoring configuration

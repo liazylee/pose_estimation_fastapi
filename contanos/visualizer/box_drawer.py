@@ -25,7 +25,7 @@ yolox data structure is as follows:
 raw_frame data structure is as follows:
 return {
                 'data': frame_np,
-                'frame_id_str': str(payload_data.get('frame_id', record.offset)),
+                'frame_id': str(payload_data.get('frame_id', record.offset)),
                 'topic': record.topic,
                 'partition': record.partition,
                 'offset': record.offset,
@@ -56,28 +56,25 @@ def draw_boxes_on_frame(frame: np.ndarray,
     """
     if not isinstance(frame, np.ndarray):
         raise ValueError("Frame must be a numpy array")
-
+    s_track_id = 1
     for detection in detections:
-        bbox = detection.get('bbox', [])
-        if len(bbox) < 4:
+
+        if len(detection) < 4:
             continue  # Skip invalid bounding boxes
 
-        x1, y1, x2, y2 = [int(coord * scale) for coord in bbox]
-        track_id = detection.get('track_id', None)
-        score = detection.get('score', 0.0)
-        class_id = detection.get('class_id', 0)
+        x1, y1, x2, y2 = [int(coord * scale) for coord in detection]
 
         # Draw rectangle
-        cv.rectangle(frame, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=2)
-
+        cv.rectangle(frame, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=1)
+        track_id = None
+        # todo :  get real track_id from detection later
         if draw_labels:
             # Create label with available information
             if track_id is not None:
                 label = f"ID: {track_id}"
             else:
                 # If no track_id, show confidence and class name
-                class_name = detection.get('class_name', 'unknown')
-                label = f"{class_name}: {score:.2f}"
-            
-            cv.putText(frame, label, (x1, y1 - 10), cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
+                label = f"ID: {s_track_id}"
+                s_track_id += 1
+            cv.putText(frame, label, (x1, y1 - 10), cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
     return frame

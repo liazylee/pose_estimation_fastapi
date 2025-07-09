@@ -27,18 +27,12 @@ class YOLOXWorker(BaseWorker):
         """Initialize the YOLOX model."""
         try:
             # Create model configuration
-            model_kwargs = {
-                'device': self.device,
-                **self.model_config
-            }
-
+            device = self.device
+            if self.device.startswith('cuda:'):
+                device = 'cuda'
+            model_config = self.model_config
             # Handle different model configuration formats
-            if 'model_path' in self.model_config:
-                model_kwargs['model_path'] = self.model_config['model_path']
-            elif 'onnx_model' in self.model_config:
-                model_kwargs['onnx_model'] = self.model_config['onnx_model']
-
-            self.model = YOLOXModel(**model_kwargs)
+            self.model = YOLOXModel(**model_config, device=device)
             logging.info(f"YOLOXWorker {self.worker_id} model initialized successfully")
 
         except Exception as e:
@@ -55,6 +49,7 @@ class YOLOXWorker(BaseWorker):
 
             deserializer_frame = deserialize_image_from_kafka(frame)
             # Run model inference
+
             model_output = self.model(deserializer_frame)
             # output :[[  1.7640184   2.6469145 212.87782   337.55084  ]]
             if model_output is None or len(model_output) == 0:
@@ -69,10 +64,7 @@ class YOLOXWorker(BaseWorker):
                     logging.warning(f"Worker {self.worker_id} received invalid bounding box: {bbox}")
                     continue
                 x1, y1, x2, y2 = bbox[:4]
-                detections.append({
-                    'bbox': [x1, y1, x2, y2],
-                    'class_name': 'person'  # Assuming the model is focused on person detection
-                })
+                detections.append([x1, y1, x2, y2])
             result = {
                 'detections': detections,
                 'detection_count': len(detections),

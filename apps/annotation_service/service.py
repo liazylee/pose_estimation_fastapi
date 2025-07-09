@@ -3,57 +3,64 @@
 Annotation service for drawing detection overlays and generating RTSP output.
 Consumes raw_frames and yolox_detections from Kafka, renders annotations, and outputs to RTSP.
 """
+import argparse
 import asyncio
 import logging
 import os
 import sys
 from typing import Dict, Any
 
-import cv2
-import numpy as np
+import torch
 import yaml
 
+from contanos.io.kafka_input_interface import KafkaInput
 from contanos.io.multi_input_interface import MultiInputInterface
+from contanos.io.multi_output_interface import MultiOutputInterface
+from contanos.io.rtsp_output_interface import RTSPOutput
+from contanos.io.video_output_interface import VideoOutput
 
 # Add parent directories to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
-from contanos.io.kafka_input_interface import KafkaInput
-from contanos.io.rtsp_output_interface import RTSPOutput
-from contanos.visualizer.box_drawer import draw_boxes_on_frame
+from contanos.base_service import BaseService
+from contanos.helpers.create_a_processor import create_a_processor
+from contanos.utils.setup_logging import setup_logging
+
+# Import AnnotationWorker with error handling for different execution contexts
+try:
+    from .annotation_worker import AnnotationWorker
+except ImportError:
+    # If relative import fails, try absolute import
+    try:
+        from annotation_worker import AnnotationWorker
+    except ImportError:
+        from apps.annotation_service.annotation_worker import AnnotationWorker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class AnnotationService:
-    """Main annotation service class."""
+    """Annotation service using contanos framework with dynamic task support."""
 
-    def __init__(self, config_path: str, task_id: str):
-        self.config_path = config_path
+    def __init__(self, config_path: str = "dev_pose_estimation_config.yaml", task_id: str = None):
+        if task_id is None:
+            raise ValueError("task_id is required and cannot be None. Please specify a task_id.")
+
         self.task_id = task_id
-        self.config = self._load_config(self.config_path)
+        self.config = self._load_config(config_path)
+        self.processor = None
+        self.service = None
 
-        # Initialize components
-        self.multi_input_interface = None
-        self.rtsp_output = None
-
-        # Video file output
-        self.video_writer = None
-        self.video_output_enabled = False
-        self.video_output_path = None
-
-        # Processing state
-        self.is_running = False
+        # Processing state for stats
         self.frame_count = 0
         self.detection_count = 0
-
-        logger.info(f"Initialized AnnotationService for task: {task_id}")
+        self._stop_event = asyncio.Event()
+        logger.info(f"Annotation Service initialized with task_id: '{self.task_id}'")
 
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """Load configuration from YAML file."""
         # Try multiple possible locations for the config file
-        # Get the absolute path of the current script
         script_dir = os.path.dirname(os.path.abspath(__file__))
 
         possible_paths = [
@@ -75,45 +82,25 @@ class AnnotationService:
                 break
 
         if not config_file:
-            logger.error(f"Configuration file '{config_path}' not found!")
-            logger.error("Tried the following paths:")
-            for i, path in enumerate(possible_paths, 1):
-                abs_path = os.path.abspath(path)
-                exists = "✅" if os.path.exists(abs_path) else "❌"
-                logger.error(f"  {i}. {abs_path} {exists}")
-            raise FileNotFoundError(f"Configuration file not found. Tried {len(possible_paths)} paths.")
+            logger.error(f"Configuration file not found: {config_path}")
+            logger.error(f"Searched paths: {possible_paths}")
+            raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
-        try:
-            with open(config_file, 'r') as f:
-                config = yaml.safe_load(f)
-            logger.info(f"Successfully loaded configuration from: {config_file}")
-            return config
-        except Exception as e:
-            logger.error(f"Failed to load config from {config_file}: {e}")
-            raise
+        logger.info(f"Loading configuration from: {config_file}")
 
-    def _get_kafka_input_config(self, topic_suffix: str, consumer_group: str) -> Dict[str, Any]:
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+
+        return config
+
+    def _get_kafka_input_config(self, topic_suffix: str, group_suffix: str) -> Dict[str, Any]:
         """Get Kafka input configuration for a specific topic."""
         kafka_config = self.config.get('kafka', {})
-        bootstrap_servers = kafka_config.get('bootstrap_servers', 'localhost:9092')
-
-        topic_template = kafka_config.get('topics', {}).get(topic_suffix, f"{topic_suffix}_{{task_id}}")
-        topic = topic_template.format(task_id=self.task_id)
-
-        consumer_group_template = kafka_config.get('consumer_groups', {}).get(consumer_group,
-                                                                              f"{consumer_group}_{{task_id}}")
-        group_id = consumer_group_template.format(task_id=self.task_id)
-
-        consumer_settings = kafka_config.get('consumer', {})
 
         return {
-            'bootstrap_servers': bootstrap_servers,
-            'topic': topic,
-            'group_id': group_id,
-            'auto_offset_reset': consumer_settings.get('auto_offset_reset', 'latest'),
-            'max_poll_records': consumer_settings.get('max_poll_records', 1),
-            'consumer_timeout_ms': consumer_settings.get('consumer_timeout_ms', 1000),
-            'enable_auto_commit': consumer_settings.get('enable_auto_commit', True)
+            **kafka_config,
+            'topic': f"{topic_suffix}_{self.task_id}",
+            'group_id': f"{group_suffix}_{self.task_id}",
         }
 
     def _get_rtsp_output_config(self) -> Dict[str, Any]:
@@ -148,7 +135,7 @@ class AnnotationService:
 
             return config
 
-        # Default configuration
+        # Default configuration using rtsp config section
         return {
             'addr': rtsp_config.get('output_stream', 'rtsp://localhost:8554'),
             'topic': f"outstream_{self.task_id}",
@@ -157,323 +144,235 @@ class AnnotationService:
             'fps': rtsp_config.get('output_fps', 25)
         }
 
-    def _ensure_frame_size(self, frame: np.ndarray) -> np.ndarray:
-        """Ensure frame matches video output dimensions."""
-        video_config = self._get_video_output_config()
-        target_width = video_config.get('width', 1920)
-        target_height = video_config.get('height', 1080)
-
-        current_height, current_width = frame.shape[:2]
-
-        if current_width != target_width or current_height != target_height:
-            logger.debug(f"Resizing frame from {current_width}x{current_height} to {target_width}x{target_height}")
-            frame = cv2.resize(frame, (target_width, target_height))
-
-        return frame
-
     def _get_video_output_config(self) -> Dict[str, Any]:
-        """Get video file output configuration."""
+        """Get video output configuration."""
         annotation_config = self.config.get('annotation', {})
         video_config = annotation_config.get('video_output', {})
 
-        if not video_config.get('enabled', True):  # Default to enabled
-            return {'enabled': False}
-
-        # Create output directory based on task_id
-        base_dir = video_config.get('output_dir', 'output_videos')
-        output_dir = os.path.join(base_dir, self.task_id)
-        os.makedirs(output_dir, exist_ok=True)
-
-        # Generate output filename with timestamp
-        import datetime
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = video_config.get('filename_template', 'annotated_{task_id}_{timestamp}.mp4')
-        filename = filename.format(task_id=self.task_id, timestamp=timestamp)
-        output_path = os.path.join(output_dir, filename)
-
         return {
-            'enabled': True,
-            'output_path': output_path,
+            'task_id': self.task_id,
+            'output_dir': video_config.get('output_dir', 'output_videos'),
+            'enabled': video_config.get('enabled', True),
+            'filename_template': video_config.get('filename_template', 'annotated_{task_id}_{timestamp}.mp4'),
             'width': video_config.get('width', 1920),
             'height': video_config.get('height', 1080),
             'fps': video_config.get('fps', 25),
-            'codec': video_config.get('codec', 'mp4v'),  # or 'XVID', 'H264'
-            'quality': video_config.get('quality', 1.0)  # 0.0 to 1.0, lower = more compression
+            'codec': video_config.get('codec', 'libx264'),
+            'preset': video_config.get('preset', 'fast'),
+            'crf': video_config.get('crf', 23),
+            'bitrate': video_config.get('bitrate', '2000k'),
+            'pixel_format': video_config.get('pixel_format', 'yuv420p'),
+            'queue_max_len': video_config.get('queue_max_len', 100)
         }
 
-    async def _initialize_inputs(self) -> None:
-        """Initialize Kafka input interfaces using MultiInputInterface."""
-        # Initialize raw frames input
-        frame_config = self._get_kafka_input_config('raw_frames', 'annotation_raw')
-        kafka_frame_input = KafkaInput(config=frame_config)
-        logger.info(f"Configured frames input: {frame_config['topic']}")
+    def _get_devices(self) -> list:
+        """Get list of devices from configuration."""
+        annotation_config = self.config.get('annotation', {})
+        global_config = self.config.get('global', {})
 
-        # Initialize detections input
-        detection_config = self._get_kafka_input_config('yolox_output', 'annotation_track')
-        kafka_detection_input = KafkaInput(config=detection_config)
-        logger.info(f"Configured detections input: {detection_config['topic']}")
+        device_config = annotation_config.get('devices') or global_config.get('devices', 'cpu')
 
-        # Initialize MultiInputInterface with all relevant inputs
-        self.multi_input_interface = MultiInputInterface(interfaces=[
-            kafka_frame_input,
-            kafka_detection_input
-        ])
-        await self.multi_input_interface.initialize()
-        logger.info("Initialized MultiInputInterface for annotation service")
-
-    async def _initialize_output(self) -> None:
-        """Initialize RTSP output interface."""
-        rtsp_config = self._get_rtsp_output_config()
-        self.rtsp_output = RTSPOutput(config=rtsp_config)
-        await self.rtsp_output.initialize()
-        logger.info(f"Initialized RTSP output: {rtsp_config['addr']}/{rtsp_config['topic']}")
-
-    async def _initialize_video_output(self) -> None:
-        """Initialize video file output."""
-        video_config = self._get_video_output_config()
-
-        if not video_config.get('enabled', False):
-            logger.info("Video file output disabled")
-            self.video_output_enabled = False
-            return
-
-        try:
-            # Get video parameters
-            width = video_config['width']
-            height = video_config['height']
-            fps = video_config['fps']
-            codec = video_config['codec']
-            output_path = video_config['output_path']
-
-            # Create fourcc code for codec
-            if codec.upper() == 'H264':
-                fourcc = cv2.VideoWriter_fourcc(*'H264')
-            elif codec.upper() == 'XVID':
-                fourcc = cv2.VideoWriter_fourcc(*'XVID')
-            elif codec.upper() == 'MP4V':
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        if isinstance(device_config, str):
+            if device_config.lower() == 'cuda':
+                try:
+                    if torch.cuda.is_available():
+                        return ['cuda']
+                    else:
+                        logger.warning("CUDA not available, falling back to CPU")
+                        return ['cpu']
+                except ImportError:
+                    logger.warning("PyTorch not available, using CPU")
+                    return ['cpu']
             else:
-                logger.warning(f"Unknown codec '{codec}', using default 'mp4v'")
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                return [device_config]
+        elif isinstance(device_config, list):
+            return device_config
+        else:
+            logger.warning(f"Invalid device configuration: {device_config}, using CPU")
+            return ['cpu']
 
-            # Initialize VideoWriter
-            self.video_writer = cv2.VideoWriter(
-                output_path,
-                fourcc,
-                fps,
-                (width, height)
+    def _get_model_config(self) -> Dict[str, Any]:
+        """Get model configuration for annotation service."""
+        annotation_config = self.config.get('annotation', {})
+
+        model_config = {
+            'debug_output_dir': annotation_config.get('debug_output_dir', 'debug_frames'),
+            'video_output': annotation_config.get('video_output', {}),
+            'task_id': self.task_id
+        }
+
+        return model_config
+
+    def _get_processing_config(self) -> Dict[str, Any]:
+        """Get processing configuration."""
+        global_config = self.config.get('global', {})
+
+        return {
+            'workers_per_device': global_config.get('num_workers_per_device', 1),
+            'health_check_interval': 5.0,
+            'max_restart_attempts': 3,
+            'restart_cooldown': 3
+        }
+
+    async def start_service(self):
+        """Start the Annotation service using contanos framework."""
+        try:
+            # Setup logging
+            global_config = self.config.get('global', {})
+            log_level = global_config.get('log_level', 'INFO')
+            setup_logging(log_level)
+            logger.info(f"Starting Annotation service with contanos framework for task: {self.task_id}")
+
+            # Get input/output configurations
+            frames_config = self._get_kafka_input_config('raw_frames', 'annotation_raw')
+            detections_config = self._get_kafka_input_config('yolox_detections', 'annotation_track')
+            poses_config = self._get_kafka_input_config('rtmpose_results', 'annotation_pose')
+
+            # Get output configurations
+            rtsp_config = self._get_rtsp_output_config()
+            video_config = self._get_video_output_config()
+
+            # Initialize input interfaces
+            frames_input = KafkaInput(frames_config)
+            detections_input = KafkaInput(detections_config)
+            poses_input = KafkaInput(poses_config)
+            multi_input = MultiInputInterface([frames_input, detections_input, poses_input])
+            await multi_input.initialize()
+            # Initialize output interfaces
+            output_interfaces = []
+
+            # Always add RTSP output
+            rtsp_output = RTSPOutput(rtsp_config)
+            output_interfaces.append(rtsp_output)
+
+            # Add video output if enabled
+            if video_config.get('enabled', True):  # Default to enabled
+                video_output = VideoOutput(video_config)
+                output_interfaces.append(video_output)
+                logger.info(f"Video output enabled: {video_config.get('output_dir', 'output_videos')}")
+            else:
+                logger.info("Video output disabled")
+
+            multi_output = MultiOutputInterface(output_interfaces)
+            await multi_output.initialize()
+            # Get devices and processing configuration  
+            devices = self._get_devices()
+            processing_config = self._get_processing_config()
+            model_config = self._get_model_config()
+
+            logger.info(f"Using devices: {devices}")
+            logger.info(f"Workers per device: {processing_config['workers_per_device']}")
+
+            # Create processor with workers using correct parameters
+            workers, self.processor = create_a_processor(
+                worker_class=AnnotationWorker,
+                model_config=model_config,
+                devices=devices,
+                input_interface=multi_input,
+                output_interface=multi_output,
+                num_workers_per_device=processing_config['workers_per_device']
             )
 
-            if not self.video_writer.isOpened():
-                raise Exception("Failed to open VideoWriter")
+            logger.info(f"Created {len(workers)} workers across {len(devices)} devices")
 
-            self.video_output_enabled = True
-            self.video_output_path = output_path
+            # Create and start service with monitoring
+            self.service = BaseService(
+                processor=self.processor,
+                health_check_interval=processing_config['health_check_interval'],
+                max_restart_attempts=processing_config['max_restart_attempts'],
+                restart_cooldown=processing_config['restart_cooldown']
+            )
 
-            logger.info(f"Video output initialized: {output_path}")
-            logger.info(f"Video parameters: {width}x{height} @ {fps}fps, codec: {codec}")
-
+            # Start service
+            async with self.service:
+                async with self.processor:
+                    logger.info(f"Annotation service started successfully for task: {self.task_id}")
+                    logger.info("Service is running. Press Ctrl+C to stop.")
+                    try:
+                        while True:
+                            if all(t.done() for t in self.processor.worker_tasks):
+                                logger.info("All worker tasks completed. Exiting service.")
+                                break
+                            await asyncio.sleep(1)  # Keep the service running
+                    except asyncio.CancelledError:
+                        logger.info("Service stopped by user")
+                    except KeyboardInterrupt:
+                        logger.info("Service interrupted by user")
         except Exception as e:
-            logger.error(f"Failed to initialize video output: {e}")
-            self.video_output_enabled = False
-
-    async def _annotation_processor(self) -> None:
-        """Process synchronized frames and detections."""
-        logger.info("Starting annotation processor...")
-        processed_count = 0
-
-        while self.is_running:
-            try:
-                # Get synchronized pair
-                logging.info(f"[DEBUG] Producer is waiting for data...")
-
-                data_list, metadata_list = await self.multi_input_interface.read_data()
-                logger.info(f'data_list,{data_list}')
-                logger.info('=' * 30)
-                logger.info(f'metadata_list,{metadata_list}')
-                # Extract frame and detections
-                frame = data_list[0]
-                detections = data_list[1]
-
-                # Process detections data
-                if isinstance(detections, dict):
-                    # Handle YOLOX result format
-                    detection_list = detections.get('detections', [])
-                elif isinstance(detections, list):
-                    detection_list = detections
-                else:
-                    logger.warning(f"Unknown detection format: {type(detections)}")
-                    detection_list = []
-
-                frame_id = metadata_list[0].get('frame_id_str', 'unknown')
-                logger.debug(f"Processing frame {frame_id}: {len(detection_list)} detections")
-                # Draw annotations
-                annotated_frame = self._draw_annotations(frame, detection_list)
-
-                # Send to RTSP output
-                await self._send_to_rtsp(annotated_frame)
-
-                # Save to video file
-                await self._save_to_video(annotated_frame)
-
-                processed_count += 1
-                if processed_count % 10 == 0:
-                    logger.info(f"Processed {processed_count} annotated frames")
-
-            except Exception as e:
-                logger.error(f"Error in annotation processor: {e}")
-                await asyncio.sleep(0.1)
-
-    def _draw_annotations(self, frame: np.ndarray, detections: list) -> np.ndarray:
-        """Draw annotations on the frame."""
-        try:
-            # Create a copy to avoid modifying the original frame
-            annotated_frame = frame.copy()
-
-            # Convert detections to the format expected by box_drawer
-            formatted_detections = []
-            for detection in detections:
-                if isinstance(detection, dict):
-                    bbox = detection.get('bbox', [])
-                    confidence = detection.get('confidence', 0.0)
-                    class_name = detection.get('class_name', 'unknown')
-                    class_id = detection.get('class_id', 0)
-
-                    if len(bbox) >= 4:
-                        formatted_detection = {
-                            'bbox': bbox,
-                            'score': confidence,  # box_drawer expects 'score' field
-                            'class_id': class_id,
-                            'class_name': class_name,
-                            'track_id': None  # No tracking info yet
-                        }
-                        formatted_detections.append(formatted_detection)
-
-            # Draw boxes using the existing box_drawer function
-            if formatted_detections:
-                annotated_frame = draw_boxes_on_frame(
-                    annotated_frame,
-                    formatted_detections,
-                    scale=1.0,
-                    draw_labels=True
-                )
-
-            # Add frame info overlay
-
-            return annotated_frame
-
-        except Exception as e:
-            logger.error(f"Error drawing annotations: {e}")
-            return frame
-
-    async def _send_to_rtsp(self, frame: np.ndarray) -> None:
-        """Send annotated frame to RTSP output."""
-        try:
-            # Ensure frame size matches configuration
-            frame = self._ensure_frame_size(frame)
-
-            # Convert BGR to RGB for RTSP output
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-            # Prepare data for RTSP output
-            rtsp_data = {
-                'results': {
-                    'annotated_frame': rgb_frame
-                }
-            }
-
-            await self.rtsp_output.write_data(rtsp_data)
-
-        except Exception as e:
-            logger.error(f"Error sending frame to RTSP: {e}")
-
-    async def _save_to_video(self, frame: np.ndarray) -> None:
-        """Save annotated frame to video file."""
-        try:
-            if self.video_output_enabled and self.video_writer:
-                # Ensure frame size matches video writer configuration
-                frame = self._ensure_frame_size(frame)
-
-                # OpenCV VideoWriter expects BGR format
-                self.video_writer.write(frame)
-
-        except Exception as e:
-            logger.error(f"Error saving frame to video: {e}")
-
-    async def start(self) -> None:
-        """Start the annotation service."""
-        try:
-            logger.info(f"Starting Annotation Service for task: {self.task_id}")
-
-            # Initialize inputs and output
-            await self._initialize_inputs()
-            await self._initialize_output()
-            await self._initialize_video_output()
-
-            # Set running state
-            self.is_running = True
-
-            # Start all async tasks
-            tasks = [
-                asyncio.create_task(self._annotation_processor())
-            ]
-
-            logger.info("All tasks started. Press Ctrl+C to stop...")
-
-            # Wait for all tasks
-            await asyncio.gather(*tasks)
-
-        except KeyboardInterrupt:
-            logger.info("Received interrupt signal")
-        except Exception as e:
-            logger.error(f"Error in annotation service: {e}")
+            logger.error(f"Error starting Annotation service: {e}")
             raise
         finally:
-            await self.stop()
+            await self._cleanup()
 
-    async def stop(self) -> None:
-        """Stop the annotation service."""
-        logger.info("Stopping annotation service...")
+    async def stop(self):
+        """Stop the Annotation service gracefully."""
+        logger.info("Stopping Annotation service...")
+        self._stop_event.set()
+        await self._cleanup()
+        logger.info("Annotation service stopped successfully.")
 
-        self.is_running = False
+    async def _cleanup(self):
+        """Clean up resources."""
+        try:
+            if self.processor:
+                await self.processor.stop()
+            if self.service:
+                await self.service.stop_monitoring()
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
 
-        # Cleanup interfaces
-        if self.multi_input_interface:
-            await self.multi_input_interface.cleanup()
+    def get_service_status(self) -> Dict[str, Any]:
+        """Get current service status."""
+        if not self.processor:
+            return {'status': 'not_started', 'task_id': self.task_id}
 
-        if self.rtsp_output:
-            await self.rtsp_output.cleanup()
-
-        # Cleanup video output
-        if self.video_writer:
-            self.video_writer.release()
-            logger.info(f"Video file saved: {self.video_output_path}")
-
-        logger.info("Annotation service stopped")
+        worker_status = self.processor.get_worker_status() if hasattr(self.processor, 'get_worker_status') else []
+        return {
+            'status': 'running' if self.processor.is_running else 'stopped',
+            'task_id': self.task_id,
+            'workers': worker_status,
+            'service_monitoring': self.service is not None and getattr(self.service, 'is_running', False)
+        }
 
 
-def main():
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Annotation Service",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  %(prog)s --task-id camera1
+  %(prog)s --task-id warehouse_cam
+  %(prog)s --task-id production --config custom_config.yaml
+  
+Topic naming:
+  Frames input:     raw_frames_{task_id}
+  Detections input: yolox_detections_{task_id}
+  RTSP output:      outstream_{task_id}
+        """
+    )
+    parser.add_argument('--config', type=str, default='dev_pose_estimation_config.yaml',
+                        help='Path to configuration file')
+    parser.add_argument('--task-id', type=str, required=True,
+                        help='Task ID for dynamic topic generation (REQUIRED)')
+    return parser.parse_args()
+
+
+async def main():
     """Main entry point."""
-    import argparse
-
-    parser = argparse.ArgumentParser(description='Annotation Service')
-    parser.add_argument('--task-id', required=True, help='Task ID')
-    parser.add_argument('--config', default='dev_pose_estimation_config.yaml',
-                        help='Configuration file path')
-
-    args = parser.parse_args()
-
-    # Create and start service
-    service = AnnotationService(args.config, args.task_id)
+    args = parse_args()
 
     try:
-        asyncio.run(service.start())
+        service = AnnotationService(config_path=args.config, task_id=args.task_id)
+        await service.start_service()
+
     except KeyboardInterrupt:
         logger.info("Service interrupted by user")
     except Exception as e:
-        logger.error(f"Service failed: {e}")
-        sys.exit(1)
+        logger.error(f"Service error: {e}")
+        raise
 
 
-if __name__ == '__main__':
-    main()
+if __name__ == "__main__":
+    asyncio.run(main())

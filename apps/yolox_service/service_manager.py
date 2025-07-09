@@ -37,7 +37,7 @@ class ServiceManager:
 
                     # Check if service should be auto-stopped due to restart limit
                     if (service_info["status"] == "error" and
-                            service_info.get("restart_count", 0) >= service_info.get("max_restarts", 30)):
+                            service_info.get("restart_count", 0) >= service_info.get("max_restarts", 3)):
                         await self._mark_service_failed(task_id, "Maximum restart attempts exceeded")
 
                     # Here you could add other monitoring logic like:

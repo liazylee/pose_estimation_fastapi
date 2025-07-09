@@ -1,15 +1,16 @@
 from __future__ import annotations
 
-from typing import Any, Dict
-import logging
-import json
 import asyncio
+import json
+import logging
 import time
 from abc import ABC
+from typing import Any, Dict
 
 try:
     from kafka import KafkaProducer
     from kafka.errors import KafkaError
+
     KAFKA_AVAILABLE = True
 except ImportError:
     KAFKA_AVAILABLE = False
@@ -22,11 +23,11 @@ class KafkaOutput(ABC):
     def __init__(self, config: Dict[str, Any]):
         if not KAFKA_AVAILABLE:
             raise ImportError("kafka-python package is required. Install with: pip install kafka-python")
-            
+
         super().__init__()
         self.bootstrap_servers = config["bootstrap_servers"]
         self.topic: str = config["topic"]
-        
+
         # Kafka producer configuration
         self.acks = config.get('acks', 'all')
         self.retries = config.get('retries', 3)
@@ -34,7 +35,7 @@ class KafkaOutput(ABC):
         self.linger_ms = config.get('linger_ms', 10)
         self.buffer_memory = config.get('buffer_memory', 33554432)
         self.compression_type = config.get('compression_type', 'gzip')
-        
+
         self.producer: KafkaProducer | None = None
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=int(config.get("queue_max_len", 100)))
         self.is_running: bool = False
@@ -85,14 +86,14 @@ class KafkaOutput(ABC):
                 # Send message via Kafka producer (run in executor to avoid blocking)
                 loop = asyncio.get_running_loop()
                 future = await loop.run_in_executor(
-                    None, 
+                    None,
                     lambda: self.producer.send(self.topic, value=results)
                 )
-                
+
                 # Optionally wait for send confirmation
                 # await loop.run_in_executor(None, future.get, 10)  # 10 second timeout
-                
-                logging.debug(f"Published to {self.topic}: {results.get('frame_id_str', 'unknown')}")
+
+                logging.debug(f"Published to {self.topic}: {results.get('frame_id', 'unknown')}")
                 self.queue.task_done()
 
             except asyncio.TimeoutError:
@@ -109,7 +110,7 @@ class KafkaOutput(ABC):
             # Add timestamp if not present
             if 'timestamp' not in results:
                 results['timestamp'] = time.time()
-                
+
             await self.queue.put(results)
             return True
         except Exception as e:
@@ -145,4 +146,4 @@ class KafkaOutput(ABC):
             self.queue.get_nowait()
             self.queue.task_done()
 
-        logging.info("Kafka output cleaned up") 
+        logging.info("Kafka output cleaned up")

@@ -12,9 +12,11 @@ from typing import Dict, Any
 
 import yaml
 
+from contanos import MultiInputInterface
+
 # Add parent directories to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
-
+import torch
 from contanos.base_service import BaseService
 from contanos.helpers.create_a_processor import create_a_processor
 from contanos.io.kafka_input_interface import KafkaInput
@@ -47,6 +49,7 @@ class YOLOXService:
         self.service = None
         self.input_interface = None
         self.output_interface = None
+        self.multi_input_interface = None
 
         logger.info(f"YOLOX Service initialized with task_id: '{self.task_id}'")
 
@@ -181,22 +184,16 @@ class YOLOXService:
 
     def _get_devices(self) -> list:
         """Get list of devices from configuration."""
-        # Check yolox specific devices first, then global
-        yolox_config = self.config.get('yolox', {})
+        rtmpose_config = self.config.get('rtmpose', {})
         global_config = self.config.get('global', {})
 
-        device_config = yolox_config.get('devices') or global_config.get('devices', 'cuda')
+        device_config = rtmpose_config.get('devices') or global_config.get('devices', 'cpu')
 
         if isinstance(device_config, str):
             if device_config.lower() == 'cuda':
-                # Try to detect available CUDA devices
                 try:
-                    import torch
                     if torch.cuda.is_available():
-                        num_gpus = torch.cuda.device_count()
-                        devices = [f'cuda:{i}' for i in range(num_gpus)]
-                        logger.info(f"Detected {num_gpus} CUDA devices: {devices}")
-                        return devices
+                        return ['cuda']
                     else:
                         logger.warning("CUDA not available, falling back to CPU")
                         return ['cpu']
@@ -217,7 +214,7 @@ class YOLOXService:
         global_config = self.config.get('global', {})
 
         model_config = {
-            'onnx_model': yolox_config.get('model_url'),  # 改成 onnx_model
+            'onnx_model': yolox_config.get('onnx_model'),  # 改成 onnx_model
             'model_input_size': yolox_config.get('model_input_size', [640, 640]),
             'backend': yolox_config.get('backend') or global_config.get('backend', 'onnxruntime')
         }
@@ -231,8 +228,8 @@ class YOLOXService:
         return {
             'workers_per_device': global_config.get('num_workers_per_device', 1),
             'health_check_interval': 5.0,
-            'max_restart_attempts': 30,
-            'restart_cooldown': 30.0
+            'max_restart_attempts': 3,
+            'restart_cooldown': 3
         }
 
     async def start_service(self):
@@ -255,8 +252,10 @@ class YOLOXService:
             # Initialize interfaces
             self.input_interface = KafkaInput(config=input_config)
             self.output_interface = KafkaOutput(config=output_config)
-
-            await self.input_interface.initialize()
+            self.multi_input_interface = MultiInputInterface(interfaces=[
+                self.input_interface
+            ])
+            await self.multi_input_interface.initialize()
             await self.output_interface.initialize()
 
             # Get devices and model configuration
@@ -272,7 +271,7 @@ class YOLOXService:
                 worker_class=YOLOXWorker,
                 model_config=model_config,
                 devices=devices,
-                input_interface=self.input_interface,
+                input_interface=self.multi_input_interface,
                 output_interface=self.output_interface,
                 num_workers_per_device=processing_config['workers_per_device']
             )

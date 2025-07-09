@@ -45,6 +45,7 @@ class RTSPOutput(ABC):
         logging.info(f'self.bitrate = {self.bitrate}')
         try:
             logging.info(f"Starting RTSP stream to {self.addr} on {self.topic}")
+            # loop
             ffmpeg_cmd = [
                 'ffmpeg',
                 '-f', 'rawvideo',
@@ -132,6 +133,9 @@ class RTSPOutput(ABC):
         """Write a single frame to ffmpeg stdin (blocking operation)."""
         if self.process and self.process.stdin:
             try:
+                # Ensure it's RGB24 for ffmpeg
+                if frame_np.shape[2] == 3:
+                    frame_np = cv2.cvtColor(frame_np, cv2.COLOR_BGR2RGB)
                 # Convert frame to bytes and write to stdin
                 frame_bytes = frame_np.tobytes()
                 self.process.stdin.write(frame_bytes)

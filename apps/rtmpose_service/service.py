@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
 """
-RTMPose service using contanos framework for Kafka I/O and pose estimation.
-Updated to use contanos framework with dynamic task_id support.
+RTMPose service for pose estimation.
+Consumes raw_frames and yolox_detections from Kafka, performs pose estimation, and outputs results to Kafka.
 """
-import argparse
 import asyncio
 import logging
 import os
 import sys
 from typing import Dict, Any
 
+import torch
 import yaml
+
+from contanos.io.multi_input_interface import MultiInputInterface
 
 # Add parent directories to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
@@ -20,7 +22,6 @@ from contanos.helpers.create_a_processor import create_a_processor
 from contanos.io.kafka_input_interface import KafkaInput
 from contanos.io.kafka_output_interface import KafkaOutput
 from contanos.utils.setup_logging import setup_logging
-from contanos.utils.yaml_config_loader import ConfigLoader
 
 # Import RTMPoseWorker with error handling for different execution contexts
 try:
@@ -32,128 +33,121 @@ except ImportError:
     except ImportError:
         from apps.rtmpose_service.rtmpose_worker import RTMPoseWorker
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
 class RTMPoseService:
-    """RTMPose pose estimation service using contanos framework with dynamic task support."""
+    """RTMPose estimation service using contanos framework with dynamic task support."""
 
-    def __init__(self, task_id: str, config_path: str = "apps/dev_pose_estimation_config.yaml"):
+    def __init__(self, config_path: str = "dev_pose_estimation_config.yaml", task_id: str = None):
+        if task_id is None:
+            raise ValueError("task_id is required and cannot be None. Please specify a task_id.")
+
         self.task_id = task_id
-        self.config_path = config_path
-        
-        # Load configuration
-        self.config_loader = ConfigLoader(config_path)
-        self.config = self.config_loader.config
-        
-        # Initialize interfaces
-        self.input_interface = None
+        self.config = self._load_config(config_path)
+        self.processor = None
+        self.service = None
+        self.multi_input_interface = None
         self.output_interface = None
 
-    def _substitute_task_id(self, config_str: str) -> str:
-        """Substitute {task_id} placeholder in configuration strings."""
-        return config_str.replace('{task_id}', self.task_id)
+        logger.info(f"RTMPose Service initialized with task_id: '{self.task_id}'")
 
-    def _parse_kafka_config_string(self, config_str: str) -> Dict[str, Any]:
-        """Parse Kafka configuration string into dict."""
-        from contanos.utils.parse_config_string import parse_config_string
-        return parse_config_string(config_str)
+    def _load_config(self, config_path: str) -> Dict[str, Any]:
+        """Load configuration from YAML file."""
+        # Try multiple possible locations for the config file
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+
+        possible_paths = [
+            config_path,  # Absolute path or relative to current working directory
+            os.path.join(script_dir, config_path),  # Relative to service directory
+            os.path.join(script_dir, "..", config_path),  # Relative to apps directory
+            os.path.join(script_dir, "..", "..", config_path),  # Relative to project root
+            # Additional backup paths
+            os.path.join(os.getcwd(), config_path),  # Current working directory
+            os.path.join(os.getcwd(), "apps", config_path),  # If running from project root
+            os.path.join(os.getcwd(), "..", config_path),  # If running from subdirectory
+        ]
+
+        config_file = None
+        for path in possible_paths:
+            abs_path = os.path.abspath(path)
+            if os.path.exists(abs_path):
+                config_file = abs_path
+                break
+
+        if not config_file:
+            logger.error(f"Configuration file not found: {config_path}")
+            logger.error(f"Searched paths: {possible_paths}")
+            raise FileNotFoundError(f"Configuration file not found: {config_path}")
+
+        logger.info(f"Loading configuration from: {config_file}")
+
+        with open(config_file, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+
+        return config
+
+    def _get_kafka_input_config(self, topic_suffix: str, group_suffix: str) -> Dict[str, Any]:
+        """Get Kafka input configuration for a specific topic."""
+        kafka_config = self.config.get('kafka', {})
+
+        return {
+            **kafka_config,
+            'topic': f"{topic_suffix}_{self.task_id}",
+            'group_id': f"{group_suffix}_{self.task_id}",
+        }
+
+    def _get_kafka_output_config(self) -> Dict[str, Any]:
+        """Get Kafka output configuration."""
+        kafka_config = self.config.get('kafka', {})
+
+        return {
+            **kafka_config,
+            'topic': f"rtmpose_results_{self.task_id}",
+        }
 
     def _get_devices(self) -> list:
-        """Get devices from configuration."""
+        """Get list of devices from configuration."""
         rtmpose_config = self.config.get('rtmpose', {})
-        devices_config = rtmpose_config.get('devices', 'cuda')
-        
-        if isinstance(devices_config, str):
-            if devices_config == 'cuda':
-                # Auto-detect CUDA devices
-                import torch
-                if torch.cuda.is_available():
-                    return [f'cuda:{i}' for i in range(torch.cuda.device_count())]
-                else:
+        global_config = self.config.get('global', {})
+
+        device_config = rtmpose_config.get('devices') or global_config.get('devices', 'cpu')
+
+        if isinstance(device_config, str):
+            if device_config.lower() == 'cuda':
+                # 对于多GPU支持，但保持简单的设备格式
+                try:
+                    if torch.cuda.is_available():
+                        # 返回单个 'cuda' 而不是 'cuda:0', 'cuda:1' 列表
+                        # 让 RTMPose 自己处理设备选择
+                        return ['cuda']
+                    else:
+                        logger.warning("CUDA not available, falling back to CPU")
+                        return ['cpu']
+                except ImportError:
+                    logger.warning("PyTorch not available, using CPU")
                     return ['cpu']
-            elif devices_config == 'cpu':
-                return ['cpu']
             else:
-                return [devices_config]
-        elif isinstance(devices_config, list):
-            return devices_config
+                return [device_config]
+        elif isinstance(device_config, list):
+            return device_config
         else:
+            logger.warning(f"Invalid device configuration: {device_config}, using CPU")
             return ['cpu']
 
     def _get_model_config(self) -> Dict[str, Any]:
-        """Get model configuration for RTMPose."""
+        """Get model configuration from RTMPose service config."""
         rtmpose_config = self.config.get('rtmpose', {})
-        
+        global_config = self.config.get('global', {})
+
         model_config = {
-            'model_path': rtmpose_config.get('model_path'),
-            'model_url': rtmpose_config.get('model_url'),
-            'backend': rtmpose_config.get('backend', 'onnxruntime'),
-            'device': 'cuda',  # Will be overridden per worker
+            'onnx_model': rtmpose_config.get('onnx_model'),
+            'model_input_size': rtmpose_config.get('model_input_size'),
+            'backend': rtmpose_config.get('backend') or global_config.get('backend', 'onnxruntime')
         }
-        
-        # Add model-specific parameters
-        if 'model' in rtmpose_config:
-            model_config.update(rtmpose_config['model'])
-            
+
         return model_config
-
-    def _get_kafka_input_config(self) -> Dict[str, Any]:
-        """Get Kafka input configuration from RTMPose service config."""
-        rtmpose_config = self.config.get('rtmpose', {})
-        input_config_str = rtmpose_config.get('input', {}).get('config', '')
-
-        # Substitute task_id
-        input_config_str = self._substitute_task_id(input_config_str)
-
-        # Parse Kafka config string
-        kafka_config = self._parse_kafka_config_string(input_config_str)
-
-        # Add default consumer settings from global Kafka config
-        global_kafka = self.config.get('kafka', {})
-        consumer_settings = global_kafka.get('consumer', {})
-
-        # Merge configurations
-        config = {
-            'bootstrap_servers': kafka_config.get('bootstrap_servers'),
-            'topic': kafka_config.get('topic'),
-            'group_id': kafka_config.get('group_id'),
-            'auto_offset_reset': consumer_settings.get('auto_offset_reset', 'latest'),
-            'max_poll_records': consumer_settings.get('max_poll_records', 1),
-            'consumer_timeout_ms': consumer_settings.get('consumer_timeout_ms', 1000),
-            'enable_auto_commit': consumer_settings.get('enable_auto_commit', True)
-        }
-
-        return config
-
-    def _get_kafka_output_config(self) -> Dict[str, Any]:
-        """Get Kafka output configuration from RTMPose service config."""
-        rtmpose_config = self.config.get('rtmpose', {})
-        output_config_str = rtmpose_config.get('output', {}).get('config', '')
-
-        # Substitute task_id
-        output_config_str = self._substitute_task_id(output_config_str)
-
-        # Parse Kafka config string
-        kafka_config = self._parse_kafka_config_string(output_config_str)
-
-        # Add default producer settings from global Kafka config
-        global_kafka = self.config.get('kafka', {})
-        producer_settings = global_kafka.get('producer', {})
-
-        # Merge configurations
-        config = {
-            'bootstrap_servers': kafka_config.get('bootstrap_servers'),
-            'topic': kafka_config.get('topic'),
-            'acks': kafka_config.get('acks', producer_settings.get('acks', 'all')),
-            'retries': kafka_config.get('retries', producer_settings.get('retries', 3)),
-            'batch_size': producer_settings.get('batch_size', 16384),
-            'linger_ms': producer_settings.get('linger_ms', 10),
-            'buffer_memory': producer_settings.get('buffer_memory', 33554432),
-            'compression_type': kafka_config.get('compression_type', producer_settings.get('compression_type', 'gzip'))
-        }
-
-        return config
 
     def _get_processing_config(self) -> Dict[str, Any]:
         """Get processing configuration."""
@@ -163,7 +157,7 @@ class RTMPoseService:
             'workers_per_device': global_config.get('num_workers_per_device', 1),
             'health_check_interval': 5.0,
             'max_restart_attempts': 3,
-            'restart_cooldown': 30.0
+            'restart_cooldown': 3
         }
 
     async def start_service(self):
@@ -176,18 +170,28 @@ class RTMPoseService:
             logger.info(f"Starting RTMPose service with contanos framework for task: {self.task_id}")
 
             # Get input/output configurations
-            input_config = self._get_kafka_input_config()
+            frames_config = self._get_kafka_input_config('raw_frames', 'rtmpose_raw')
+            detections_config = self._get_kafka_input_config('yolox_detections', 'rtmpose_det')
             output_config = self._get_kafka_output_config()
 
-            logger.info(f"Input topic: {input_config.get('topic')}")
+            logger.info(f"Frames input topic: {frames_config.get('topic')}")
+            logger.info(f"Detections input topic: {detections_config.get('topic')}")
             logger.info(f"Output topic: {output_config.get('topic')}")
-            logger.info(f"Consumer group: {input_config.get('group_id')}")
 
-            # Initialize interfaces
-            self.input_interface = KafkaInput(config=input_config)
+            # Initialize input interfaces
+            kafka_frame_input = KafkaInput(config=frames_config)
+            kafka_detection_input = KafkaInput(config=detections_config)
+
+            # Initialize MultiInputInterface for synchronized input
+            self.multi_input_interface = MultiInputInterface(interfaces=[
+                kafka_frame_input,
+                kafka_detection_input
+            ])
+            await self.multi_input_interface.initialize()
+            logger.info("Initialized MultiInputInterface for RTMPose service")
+
+            # Initialize output interface
             self.output_interface = KafkaOutput(config=output_config)
-
-            await self.input_interface.initialize()
             await self.output_interface.initialize()
 
             # Get devices and model configuration
@@ -198,56 +202,78 @@ class RTMPoseService:
             logger.info(f"Using devices: {devices}")
             logger.info(f"Model config: {model_config}")
 
-            # Create workers and processor
-            workers, processor = create_a_processor(
+            # Create processor with workers
+            workers, self.processor = create_a_processor(
                 worker_class=RTMPoseWorker,
                 model_config=model_config,
                 devices=devices,
-                input_interface=self.input_interface,
+                input_interface=self.multi_input_interface,
                 output_interface=self.output_interface,
                 num_workers_per_device=processing_config['workers_per_device']
             )
 
-            # Start service with monitoring
-            service = BaseService(
-                processor=processor,
+            logger.info(f"Created {len(workers)} workers across {len(devices)} devices")
+
+            # Create and start service with monitoring
+            self.service = BaseService(
+                processor=self.processor,
                 health_check_interval=processing_config['health_check_interval'],
                 max_restart_attempts=processing_config['max_restart_attempts'],
                 restart_cooldown=processing_config['restart_cooldown']
             )
 
-            # Run the service
-            async with service:
-                await processor.start()
-                logger.info("RTMPose service started successfully")
-                await processor.wait_for_completion()
+            # Start service
+            async with self.service:
+                async with self.processor:
+                    logger.info(f"RTMPose service started successfully for task: {self.task_id}")
+                    logger.info("Service is running. Press Ctrl+C to stop.")
+
+                    # Keep running until interrupted
+                    try:
+                        while True:
+                            await asyncio.sleep(1)
+                    except KeyboardInterrupt:
+                        logger.info("Received interrupt signal, shutting down...")
 
         except Exception as e:
-            logger.error(f"Failed to start RTMPose service: {e}")
+            logger.error(f"Error starting RTMPose service: {e}")
             raise
         finally:
-            # Cleanup
-            if self.input_interface:
-                await self.input_interface.cleanup()
+            await self._cleanup()
+
+    async def _cleanup(self):
+        """Clean up resources."""
+        try:
+            if self.multi_input_interface:
+                await self.multi_input_interface.cleanup()
             if self.output_interface:
                 await self.output_interface.cleanup()
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
 
 
-async def main():
-    """Main entry point for RTMPose service."""
-    parser = argparse.ArgumentParser(description='RTMPose Service with Contanos Framework')
-    parser.add_argument('--task_id', type=str, required=True,
-                        help='Task ID for processing pipeline')
-    parser.add_argument('--config', type=str, 
-                        default='apps/dev_pose_estimation_config.yaml',
-                        help='Path to configuration file')
-    
+def main():
+    """Main entry point."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description='RTMPose Service')
+    parser.add_argument('--task-id', required=True, help='Task ID')
+    parser.add_argument('--config', default='dev_pose_estimation_config.yaml',
+                        help='Configuration file path')
+
     args = parser.parse_args()
-    
+
     # Create and start service
-    service = RTMPoseService(task_id=args.task_id, config_path=args.config)
-    await service.start_service()
+    service = RTMPoseService(args.config, args.task_id)
+
+    try:
+        asyncio.run(service.start_service())
+    except KeyboardInterrupt:
+        logger.info("Service interrupted by user")
+    except Exception as e:
+        logger.error(f"Service failed: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

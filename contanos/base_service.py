@@ -93,6 +93,10 @@ class BaseService:
                     # Check if we should restart this worker
                     if self._should_restart_worker(worker_id):
                         await self._restart_worker(i, worker_id)
+                    else:
+                        # stop monitoring this worker
+                        logging.info(f"Worker {worker_id} will not be restarted due to limits")
+                        continue
 
     def _should_restart_worker(self, worker_id: int) -> bool:
         """Determine if a worker should be restarted."""
@@ -100,6 +104,7 @@ class BaseService:
         restart_count = self.restart_counts.get(worker_id, 0)
         if restart_count >= self.max_restart_attempts:
             logging.error(f"Worker {worker_id} has exceeded max restart attempts ({self.max_restart_attempts})")
+
             return False
 
         # Check cooldown period
@@ -142,3 +147,12 @@ class BaseService:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
         await self.stop_monitoring()
+
+    def cleanup(self):
+        """Cleanup resources."""
+        if self.monitoring_task and not self.monitoring_task.done():
+            self.monitoring_task.cancel()
+        self.is_monitoring = False
+        self.restart_counts.clear()
+        self.last_restart_times.clear()
+        logging.info("Self-healing service resources cleaned up")

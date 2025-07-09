@@ -39,25 +39,23 @@ class BaseWorker:
         while True:
             try:
                 # logging.debug(f"Worker {self.worker_id} waiting for input data...")
-                input = await self.input_interface.read_data()
-                # logging.debug(f"Worker {self.worker_id} received input: type={type(input)}, metadata keys={list(metadata.keys()) if metadata else 'None'}")
+                inputs = await self.input_interface.read_data()
 
                 results = await loop.run_in_executor(
                     self._executor,
-                    functools.partial(self._predict, input)
+                    functools.partial(self._predict, inputs)
                 )
 
                 if results is not None:
                     output = self._format_results(results)
+
                     await self.output_interface.write_data(output)
                     # self.results.append(results)  # Store for verification
                     # logging.debug(f"Worker {self.worker_id} on {self.device} processed input -> output")
             except asyncio.TimeoutError:
                 logging.info(f"Worker {self.worker_id} on {self.device} timed out, stopping")
-                break
+                raise
             except Exception as e:
                 logging.error(f"Worker {self.worker_id} on {self.device} error: {e}")
-                import traceback
-                # logging.error(f"Traceback: {traceback.format_exc()}")
-                break
+                raise
         logging.info(f"Worker {self.worker_id} on {self.device} finished")
