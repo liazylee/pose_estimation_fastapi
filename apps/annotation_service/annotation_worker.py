@@ -77,12 +77,12 @@ class AnnotationWorker(BaseWorker):
             self.frame_count += 1
 
             # Convert BGR to RGB for output (standardized format)
-            rgb_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
+            # rgb_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
 
             # Return data formatted for output interfaces
             return {
                 'results': {
-                    'annotated_frame': rgb_frame
+                    'annotated_frame': annotated_frame
                 },
                 'frame_id': inputs.get('frame_id', None),
                 'task_id': inputs.get('task_id', self.model_config.get('task_id'))
@@ -115,7 +115,7 @@ class AnnotationWorker(BaseWorker):
                     annotated_frame,
                     pose_estimations,
                 )
-            
+
             return annotated_frame
 
         except Exception as e:
@@ -127,15 +127,15 @@ class AnnotationWorker(BaseWorker):
         try:
             debug_dir = self.model_config.get('debug_output_dir', 'debug_frames')
             task_id = self.model_config.get('task_id', 'unknown')
-            
+
             # Create task-specific debug directory
             full_debug_dir = os.path.join(debug_dir, task_id)
             os.makedirs(full_debug_dir, exist_ok=True)
-            
+
             debug_frame_path = os.path.join(full_debug_dir, f"annotated_frame_{self.frame_count}.jpg")
             cv2.imwrite(debug_frame_path, frame)
             logging.info(f"Saved debug frame: {debug_frame_path}")
-            
+
         except Exception as e:
             logging.error(f"Error saving debug frame: {e}")
 
@@ -145,5 +145,5 @@ class AnnotationWorker(BaseWorker):
             logging.info(f"AnnotationWorker {self.worker_id} cleanup completed after {self.frame_count} frames")
         except Exception as e:
             logging.error(f"Error during cleanup: {e}")
-        
+
         super().cleanup()

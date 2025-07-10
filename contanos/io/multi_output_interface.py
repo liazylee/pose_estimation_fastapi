@@ -1,150 +1,188 @@
 import asyncio
+import heapq
 import logging
-from typing import Any, List, Dict
+from typing import Any, List, Dict, Optional
 
 
 class MultiOutputInterface:
-    """Wrapper for multiple output interfaces to write data to all outputs simultaneously."""
+    """Wrapper for multiple output interfaces with frame ordering capability."""
 
-    def __init__(self, interfaces: List[Any]):
+    def __init__(self, interfaces: List[Any], enable_frame_ordering: bool = True):
         self.interfaces = interfaces
+        self.enable_frame_ordering = enable_frame_ordering
         self.is_running = False
 
+        if self.enable_frame_ordering:
+            self._raw_queue = asyncio.Queue(maxsize=1000)
+            self._ordered_queue = asyncio.Queue(maxsize=1000)
+            self._frame_buffer = []
+            self._expected_frame_id: Optional[int] = None
+            self._ordering_task = None
+            self._writer_task = None
+
     async def initialize(self) -> bool:
-        """Initialize all output interfaces."""
         try:
-            # Initialize all interfaces concurrently
             results = await asyncio.gather(
                 *[interface.initialize() for interface in self.interfaces],
                 return_exceptions=True
             )
-            
-            # Check if any initialization failed
-            failed_interfaces = []
-            for idx, result in enumerate(results):
-                if isinstance(result, Exception) or result is False:
-                    failed_interfaces.append(idx)
-                    logging.error(f"Output interface {idx} failed to initialize: {result}")
 
-            # Consider initialization successful if at least one interface works
-            successful_interfaces = len(self.interfaces) - len(failed_interfaces)
-            if successful_interfaces == 0:
+            self.interfaces = [
+                iface for iface, result in zip(self.interfaces, results)
+                if not isinstance(result, Exception) and result
+            ]
+
+            if not self.interfaces:
                 logging.error("All output interfaces failed to initialize")
                 return False
 
-            if failed_interfaces:
-                logging.warning(f"{len(failed_interfaces)} output interface(s) failed, "
-                               f"continuing with {successful_interfaces} working interface(s)")
-                # Remove failed interfaces from the list
-                self.interfaces = [self.interfaces[i] for i in range(len(self.interfaces)) 
-                                 if i not in failed_interfaces]
-
             self.is_running = True
-            logging.info(f"MultiOutputInterface initialized successfully with {len(self.interfaces)} interface(s)")
+
+            if self.enable_frame_ordering:
+                self._ordering_task = asyncio.create_task(self._frame_ordering_producer())
+                self._writer_task = asyncio.create_task(self._frame_writer_consumer())
+                logging.info("Frame ordering enabled for output interfaces")
+
+            logging.info(f"Initialized with {len(self.interfaces)} interface(s)")
             return True
 
         except Exception as e:
-            logging.error(f"Failed to initialize MultiOutputInterface: {e}")
+            logging.error(f"Initialization failed: {e}")
             return False
 
     async def write_data(self, results: Dict[str, Any]) -> bool:
-        """Write data to all output interfaces concurrently."""
         if not self.is_running:
             raise RuntimeError("MultiOutputInterface not initialized")
 
         try:
-            # Write to all interfaces concurrently
-            write_tasks = []
-            for idx, interface in enumerate(self.interfaces):
-                try:
-                    task = interface.write_data(results)
-                    write_tasks.append(task)
-                except Exception as e:
-                    logging.error(f"Error creating write task for interface {idx}: {e}")
-
-            if not write_tasks:
-                logging.warning("No write tasks created")
-                return False
-
-            # Wait for all writes to complete
-            write_results = await asyncio.gather(*write_tasks, return_exceptions=True)
-
-            # Check results
-            successful_writes = 0
-            for idx, result in enumerate(write_results):
-                if isinstance(result, Exception):
-                    logging.error(f"Write failed for output interface {idx}: {result}")
-                elif result is True:
-                    successful_writes += 1
-                else:
-                    logging.warning(f"Write returned non-True result for interface {idx}: {result}")
-
-            # Consider success if at least one write succeeded
-            success = successful_writes > 0
-            if not success:
-                logging.error("All output writes failed")
-            elif successful_writes < len(write_tasks):
-                logging.warning(f"Only {successful_writes}/{len(write_tasks)} outputs succeeded")
-
-            return success
-
+            if self.enable_frame_ordering:
+                await self._raw_queue.put(results)
+                return True
+            else:
+                return await self._write_to_all_interfaces(results)
         except Exception as e:
-            logging.error(f"Error in MultiOutputInterface write_data: {e}")
+            logging.error(f"write_data error: {e}")
+            return False
+
+    async def _frame_ordering_producer(self):
+        while self.is_running:
+            try:
+                try:
+                    frame = await asyncio.wait_for(self._raw_queue.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    continue
+
+                frame_id = frame.get("frame_id")
+                if frame_id is None:
+                    await self._ordered_queue.put(frame)
+                    self._raw_queue.task_done()
+                    continue
+
+                if self._expected_frame_id is None:
+                    self._expected_frame_id = frame_id
+
+                if frame_id < self._expected_frame_id:
+                    logging.warning(f"Dropping old frame {frame_id}, expecting {self._expected_frame_id}")
+                    self._raw_queue.task_done()
+                    continue
+
+                heapq.heappush(self._frame_buffer, (frame_id, frame))
+                await self._flush_ordered_frames()
+
+                self._raw_queue.task_done()
+
+            except Exception as e:
+                logging.error(f"Ordering error: {e}")
+                await asyncio.sleep(0.1)
+
+    async def _flush_ordered_frames(self):
+        while self._frame_buffer:
+            next_id, next_frame = self._frame_buffer[0]
+            if next_id == self._expected_frame_id:
+                heapq.heappop(self._frame_buffer)
+                await self._ordered_queue.put(next_frame)
+                self._expected_frame_id += 1
+            elif len(self._frame_buffer) > 50:
+                logging.warning(f"Skipping to frame {next_id} due to full buffer")
+                self._expected_frame_id = next_id
+            else:
+                break
+
+    async def _frame_writer_consumer(self):
+        while self.is_running:
+            try:
+                frame = await self._ordered_queue.get()
+                await self._write_to_all_interfaces(frame)
+                self._ordered_queue.task_done()
+            except Exception as e:
+                logging.error(f"Writer error: {e}")
+                await asyncio.sleep(0.1)
+
+    async def _write_to_all_interfaces(self, results: Dict[str, Any]) -> bool:
+        try:
+            tasks = [iface.write_data(results) for iface in self.interfaces]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            success_count = sum(1 for r in results if r is True)
+            if success_count == 0:
+                logging.error("All writes failed")
+                return False
+            elif success_count < len(tasks):
+                logging.warning(f"Only {success_count}/{len(tasks)} writes succeeded")
+            return True
+        except Exception as e:
+            logging.error(f"Write error: {e}")
             return False
 
     async def cleanup(self):
-        """Clean up all output interfaces."""
         self.is_running = False
 
-        if not self.interfaces:
-            logging.info("No interfaces to cleanup")
-            return
-
-        try:
-            # Cleanup all interfaces concurrently
-            cleanup_tasks = []
-            for interface in self.interfaces:
+        # Cancel tasks
+        for task in [self._ordering_task, self._writer_task]:
+            if task:
+                task.cancel()
                 try:
-                    task = interface.cleanup()
-                    cleanup_tasks.append(task)
-                except Exception as e:
-                    logging.error(f"Error creating cleanup task for interface: {e}")
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
-            if cleanup_tasks:
-                cleanup_results = await asyncio.gather(*cleanup_tasks, return_exceptions=True)
-                
-                for idx, result in enumerate(cleanup_results):
-                    if isinstance(result, Exception):
-                        logging.error(f"Cleanup failed for output interface {idx}: {result}")
-
-        except Exception as e:
-            logging.error(f"Error during MultiOutputInterface cleanup: {e}")
+        # Cleanup interfaces
+        tasks = []
+        for iface in self.interfaces:
+            try:
+                tasks.append(iface.cleanup())
+            except Exception as e:
+                logging.error(f"Cleanup task error: {e}")
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
         logging.info("MultiOutputInterface cleaned up")
 
     def get_status(self) -> Dict[str, Any]:
-        """Get status of all output interfaces."""
         status = {
             'is_running': self.is_running,
             'interface_count': len(self.interfaces),
+            'frame_ordering_enabled': self.enable_frame_ordering,
             'interfaces': []
         }
 
-        for idx, interface in enumerate(self.interfaces):
-            interface_info = {
-                'index': idx,
-                'type': type(interface).__name__,
-                'is_running': getattr(interface, 'is_running', 'unknown')
+        if self.enable_frame_ordering:
+            status['frame_ordering'] = {
+                'expected_frame_id': self._expected_frame_id,
+                'buffer_size': len(self._frame_buffer),
+                'raw_queue_size': self._raw_queue.qsize(),
+                'ordered_queue_size': self._ordered_queue.qsize(),
             }
 
-            # Add specific info based on interface type
-            if hasattr(interface, 'output_path'):
-                interface_info['output_path'] = interface.output_path
-            if hasattr(interface, 'addr'):
-                interface_info['addr'] = interface.addr
-            if hasattr(interface, 'topic'):
-                interface_info['topic'] = interface.topic
+        for idx, iface in enumerate(self.interfaces):
+            info = {
+                'index': idx,
+                'type': type(iface).__name__,
+                'is_running': getattr(iface, 'is_running', 'unknown')
+            }
+            for attr in ['output_path', 'addr', 'topic']:
+                if hasattr(iface, attr):
+                    info[attr] = getattr(iface, attr)
+            status['interfaces'].append(info)
 
-            status['interfaces'].append(interface_info)
-
-        return status 
+        return status
