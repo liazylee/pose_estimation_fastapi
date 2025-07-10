@@ -14,18 +14,7 @@ global:
   # Inference backend: onnxruntime, openvino, tensorrt
   backend: "onnxruntime"
 
-# RTSP stream configuration
-rtsp:
-  # Input stream address (Docker services use internal network)
-  input_stream: "rtsp://localhost:8554"
-  input_topic: "mystream"
-  # Output stream address
-  output_stream: "rtsp://localhost:8554"
-  output_topic: "outstream"
-  # Output video parameters
-  output_width: 1920
-  output_height: 1080
-  output_fps: 25
+
 
 # Kafka message queue configuration (replaces MQTT)
 kafka:
@@ -158,6 +147,13 @@ annotation:
   output:
     type: "rtsp"
     config: "rtsp://localhost:8554,topic=outstream_{task_id},width=1920,height=1080,fps=25"
+    fps: 25
+    bitrate: "4000k"
+    width: 1920
+    height: 1080
+    preset: "fast"
+    codec: "libx264"
+    pixel_format: "yuv420p"
   # Video file output configuration (using FFmpeg)
   video_output:
     enabled: true
@@ -170,7 +166,7 @@ annotation:
     codec: "libx264"  # Use libx264 for better compatibility
     preset: "fast"     # FFmpeg preset: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
     crf: 23           # Constant Rate Factor: 0-51 (lower = better quality, 23 is good balance)
-    bitrate: "2000k"  # Target bitrate
+    bitrate: "4000k"  # Target bitrate
     pixel_format: "yuv420p"  # Standard pixel format for MP4
     queue_max_len: 100  # Maximum frames in output queue
 

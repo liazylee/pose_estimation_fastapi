@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 
 class StartServiceRequest(BaseModel):
-    """Request model for starting RTMPose service."""
+    """Request model for starting AI service."""
     task_id: str
     config_path: Optional[str] = "dev_pose_estimation_config.yaml"
     devices: Optional[List[str]] = None
@@ -44,10 +44,13 @@ class HealthSummary(BaseModel):
     total_services: int
     running_services: int
     error_services: int
-    services: Dict[str, str]
-    uptime_seconds: float
-    last_check: str
+    stopped_services: Optional[int] = 0
+    completed_services: Optional[int] = 0
+    failed_services: Optional[int] = 0
+    services: Optional[Dict[str, str]] = None
+    uptime_seconds: Optional[float] = None
+    last_check: Optional[str] = None
 
 
 # Forward reference resolution
-ServiceResponse.model_rebuild()
+ServiceResponse.model_rebuild() 

@@ -30,9 +30,9 @@ services:
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-#    volumes:
-#      - zookeeper-data:/var/lib/zookeeper/data
-#      - zookeeper-logs:/var/lib/zookeeper/log
+  #    volumes:
+  #      - zookeeper-data:/var/lib/zookeeper/data
+  #      - zookeeper-logs:/var/lib/zookeeper/log
 
   kafka:
     image: confluentinc/cp-kafka:7.5.0
@@ -58,8 +58,8 @@ services:
       KAFKA_DELETE_TOPIC_ENABLE: 'true'
       KAFKA_LOG_RETENTION_MS: 600000  # 10 minutes
       KAFKA_MESSAGE_MAX_BYTES: 52428800  # 50MB
-#    volumes:
-#      - kafka-data:/var/lib/kafka/data
+  #    volumes:
+  #      - kafka-data:/var/lib/kafka/data
   kafka-ui:
     image: provectuslabs/kafka-ui
     ports:
@@ -79,8 +79,11 @@ services:
       - "8888:8888"  # HLS
       - "8889:8889"  # WebRTC
     environment:
-      - MTX_PROTOCOLS=tcp
+      - MTX_PROTOCOLS=tcp,udp
       - MTX_RTSPADDRESS=:8554
+      - MTX_WEBRTCENABLE=true
+      - MTX_WEBRTCCERT=/cert.pem
+      - MTX_WEBRTCKEY=/key.pem
     # volumes:
     #   - ./rtsp-config.yml:/mediamtx.yml:ro
 

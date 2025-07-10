@@ -485,3 +485,14 @@ class AIServiceOrchestrator:
         health["services"]["bytetrack"] = {"healthy": False, "status": "not_implemented"}
 
         return health
+
+    async def shutdown(self):
+        """Shutdown all AI services gracefully."""
+        try:
+            await self.yolox_client.stop_all_services()
+            await self.rtmpose_client.stop_all_services()
+            await self.annotation_client.stop_all_services()
+
+        except Exception as e:
+            logger.error(f"Error during AI service shutdown: {str(e)}")
+            raise Exception(f"Failed to shutdown AI services: {str(e)}") from e

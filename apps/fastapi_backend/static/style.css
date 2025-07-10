@@ -379,19 +379,19 @@ input[type="file"]:focus, input[type="text"]:focus, select:focus {
         padding: 1rem;
         gap: 1rem;
     }
-    
+
     header {
         padding: 1rem;
     }
-    
+
     header h2 {
         font-size: 1.5rem;
     }
-    
+
     .section {
         padding: 1rem;
     }
-    
+
     .info-grid {
         grid-template-columns: 1fr;
     }
@@ -399,8 +399,14 @@ input[type="file"]:focus, input[type="text"]:focus, select:focus {
 
 /* Animation */
 @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(20px); }
-    to { opacity: 1; transform: translateY(0); }
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .section {
@@ -658,21 +664,21 @@ input[type="file"]:focus, input[type="text"]:focus, select:focus {
         flex-direction: column;
         align-items: stretch;
     }
-    
+
     .stream-controls button {
         margin-bottom: 0.5rem;
     }
-    
+
     .stream-item {
         flex-direction: column;
         align-items: stretch;
         gap: 0.5rem;
     }
-    
+
     .stream-item span {
         margin-bottom: 0.5rem;
     }
-    
+
     .api-section button {
         width: 100%;
         margin-right: 0;
@@ -691,6 +697,341 @@ input[type="file"]:focus, input[type="text"]:focus, select:focus {
 }
 
 @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-} 
+    0% {
+        transform: rotate(0deg);
+    }
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+/* Stream Tabs Styling */
+.stream-tabs {
+    display: flex;
+    margin-bottom: 1rem;
+    border-bottom: 2px solid #ecf0f1;
+}
+
+.tab-btn {
+    padding: 0.75rem 1.5rem;
+    background: none;
+    border: none;
+    border-bottom: 3px solid transparent;
+    cursor: pointer;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #7f8c8d;
+    transition: all 0.3s ease;
+    flex: 1;
+}
+
+.tab-btn.active {
+    color: #3498db;
+    border-bottom-color: #3498db;
+    background: rgba(52, 152, 219, 0.05);
+}
+
+.tab-btn:hover {
+    color: #2980b9;
+    background: rgba(52, 152, 219, 0.05);
+}
+
+.stream-content {
+    display: none;
+    animation: fadeIn 0.3s ease;
+}
+
+.stream-content.active {
+    display: block;
+}
+
+.stream-content h4 {
+    color: #2c3e50;
+    margin-bottom: 0.75rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+/* Video List Styling */
+.video-section {
+    margin-top: 1rem;
+}
+
+.video-section h4 {
+    color: #2c3e50;
+    margin-bottom: 0.75rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    border-bottom: 1px solid #ecf0f1;
+    padding-bottom: 0.5rem;
+}
+
+.video-list {
+    max-height: 300px;
+    overflow-y: auto;
+    border: 1px solid #ecf0f1;
+    border-radius: 8px;
+    padding: 0.5rem;
+    background: #f8f9fa;
+}
+
+.video-item {
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    background: white;
+    border-radius: 6px;
+    border: 1px solid #e9ecef;
+    transition: all 0.3s ease;
+}
+
+.video-item:hover {
+    border-color: #3498db;
+    box-shadow: 0 2px 8px rgba(52, 152, 219, 0.1);
+}
+
+.video-item:last-child {
+    margin-bottom: 0;
+}
+
+.video-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-bottom: 0.5rem;
+}
+
+.video-name {
+    font-weight: 600;
+    color: #2c3e50;
+    font-size: 0.9rem;
+}
+
+.video-size {
+    color: #7f8c8d;
+    font-size: 0.8rem;
+}
+
+.video-date {
+    color: #95a5a6;
+    font-size: 0.8rem;
+}
+
+.video-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+}
+
+.no-videos {
+    text-align: center;
+    color: #7f8c8d;
+    padding: 2rem;
+    font-style: italic;
+}
+
+/* AI Services Information Styling */
+.info-subsection {
+    margin-bottom: 1.5rem;
+    padding: 1rem;
+    background: rgba(52, 152, 219, 0.02);
+    border-radius: 8px;
+    border-left: 4px solid #3498db;
+}
+
+.info-subsection:last-child {
+    margin-bottom: 0;
+}
+
+.info-subsection h4 {
+    color: #2c3e50;
+    margin-bottom: 0.75rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.ai-services-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
+}
+
+.ai-services-grid div {
+    padding: 0.5rem;
+    background: white;
+    border-radius: 6px;
+    border: 1px solid #ecf0f1;
+    font-size: 0.9rem;
+}
+
+.ai-services-grid span {
+    font-weight: 600;
+    color: #27ae60;
+}
+
+.task-ai-info {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.75rem;
+}
+
+.task-ai-info div {
+    padding: 0.5rem;
+    background: white;
+    border-radius: 6px;
+    border: 1px solid #ecf0f1;
+    font-size: 0.9rem;
+}
+
+.task-ai-info span {
+    font-weight: 600;
+    color: #2980b9;
+}
+
+/* Status Colors */
+.status-unknown span,
+.status-error span {
+    color: #e74c3c !important;
+}
+
+.status-healthy span,
+.status-running span,
+.status-active span {
+    color: #27ae60 !important;
+}
+
+.status-warning span,
+.status-starting span {
+    color: #f39c12 !important;
+}
+
+.status-inactive span,
+.status-stopped span {
+    color: #95a5a6 !important;
+}
+
+/* Enhanced Button Styles */
+.btn-small {
+    padding: 0.4rem 0.8rem;
+    border: none;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    background: linear-gradient(135deg, #3498db, #2980b9);
+    color: white;
+    text-decoration: none;
+    display: inline-block;
+    text-align: center;
+}
+
+.btn-small:hover {
+    background: linear-gradient(135deg, #2980b9, #1f5f99);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(52, 152, 219, 0.3);
+}
+
+.btn-small.btn-danger {
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+}
+
+.btn-small.btn-danger:hover {
+    background: linear-gradient(135deg, #c0392b, #a93226);
+    box-shadow: 0 2px 8px rgba(231, 76, 60, 0.3);
+}
+
+/* Enhanced Modal Styles */
+.modal {
+    z-index: 1000;
+}
+
+.modal-content {
+    max-width: 90vw;
+    max-height: 90vh;
+    overflow: auto;
+}
+
+.modal-content video {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+}
+
+/* Responsive Design Enhancements */
+@media (max-width: 768px) {
+    .stream-tabs {
+        flex-direction: column;
+    }
+
+    .tab-btn {
+        border-bottom: 1px solid #ecf0f1;
+        border-right: none;
+    }
+
+    .tab-btn.active {
+        border-bottom-color: #3498db;
+    }
+
+    .video-info {
+        flex-direction: column;
+    }
+
+    .video-actions {
+        flex-direction: column;
+    }
+
+    .ai-services-grid,
+    .task-ai-info {
+        grid-template-columns: 1fr;
+    }
+
+    .info-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Loading and Error States */
+.loading {
+    text-align: center;
+    color: #7f8c8d;
+    padding: 2rem;
+    font-style: italic;
+}
+
+.error {
+    text-align: center;
+    color: #e74c3c;
+    padding: 2rem;
+    font-style: italic;
+}
+
+.no-files,
+.no-tasks,
+.no-streams {
+    text-align: center;
+    color: #7f8c8d;
+    padding: 1.5rem;
+    font-style: italic;
+    background: rgba(149, 165, 166, 0.05);
+    border-radius: 6px;
+    margin: 0.5rem 0;
+}
+
+/* Animation for new content */
+.video-item,
+.stream-item,
+.file-item,
+.task-item {
+    animation: slideInUp 0.3s ease;
+}
+
+@keyframes slideInUp {
+    from {
+        opacity: 0;
+        transform: translateY(20px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

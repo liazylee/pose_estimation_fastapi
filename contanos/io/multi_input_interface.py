@@ -14,11 +14,11 @@ class MultiInputInterface:
         self._executor = ThreadPoolExecutor(max_workers=len(interfaces))
         self._producer_tasks = []
         self._data_dict = defaultdict(lambda: {})  # {frame_id: {interface_idx: data}}
-        self._queue = asyncio.Queue(maxsize=1000)  # Stores completed {interface_idx: data}
+        self._queue = asyncio.Queue(maxsize=10000)  # Stores completed {interface_idx: data}
         self._frame_timestamp_dict = {}
         self._lock = asyncio.Lock()  # Protects _data_dict and _queue
         self._num_interfaces = len(interfaces)
-        self.max_pending_frames = 1000
+        self.max_pending_frames = 10000
         self._frame_id_order = []  #
         self.frame_timeout_sec = frame_timeout_sec
 

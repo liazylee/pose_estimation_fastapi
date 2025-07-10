@@ -72,8 +72,8 @@ class AnnotationWorker(BaseWorker):
 
             # Save debug frames periodically
             if self.frame_count % 100 == 0:
-                self._save_debug_frame(annotated_frame)
-
+                # self._save_debug_frame(annotated_frame)
+                pass
             self.frame_count += 1
 
             # Convert BGR to RGB for output (standardized format)

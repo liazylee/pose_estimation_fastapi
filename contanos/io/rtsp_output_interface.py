@@ -32,6 +32,15 @@ class RTSPOutput(ABC):
     #
     # ───────────────────────────────  PUBLIC API  ────────────────────────────────
     #
+    async def _log_ffmpeg_errors(self):
+        """Continuously read ffmpeg’s stderr and log it."""
+        assert self.process and self.process.stderr
+        while True:
+            # Read in a thread so we don’t block the event loop
+            line = await asyncio.to_thread(self.process.stderr.readline)
+            if not line:
+                break
+            logging.error(f"[ffmpeg] {line.decode().rstrip()}")
 
     async def initialize(self) -> bool:
         """
@@ -45,7 +54,7 @@ class RTSPOutput(ABC):
         logging.info(f'self.bitrate = {self.bitrate}')
         try:
             logging.info(f"Starting RTSP stream to {self.addr} on {self.topic}")
-            # loop
+            logging.info(f'the stream url is {self.addr + "/" + self.topic}')
             ffmpeg_cmd = [
                 'ffmpeg',
                 '-f', 'rawvideo',
@@ -55,6 +64,7 @@ class RTSPOutput(ABC):
                 '-r', str(self.fps),
                 '-i', '-',  # input from stdin
                 '-c:v', self.codec,
+                "-tune", "zerolatency",
                 '-preset', self.preset,
                 '-pix_fmt', self.pixel_format,
                 '-b:v', self.bitrate,
@@ -71,7 +81,8 @@ class RTSPOutput(ABC):
                 stderr=subprocess.PIPE,
                 bufsize=0
             )
-
+            # start logging its stderr
+            asyncio.create_task(self._log_ffmpeg_errors())
             # --- 3. Kick-off the async producer ---------------------------------
             self.is_running = True
             self._producer_task = asyncio.create_task(self._output_producer())
