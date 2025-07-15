@@ -64,7 +64,7 @@ class YOLOXWorker(BaseWorker):
                     logging.warning(f"Worker {self.worker_id} received invalid bounding box: {bbox}")
                     continue
                 x1, y1, x2, y2 = bbox[:4]
-                detections.append([x1, y1, x2, y2])
+                detections.append({"bbox": [x1, y1, x2, y2]})
             result = {
                 'detections': detections,
                 'detection_count': len(detections),

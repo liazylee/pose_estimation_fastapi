@@ -57,6 +57,7 @@ class RTMPoseWorker(BaseWorker):
             if not isinstance(detections, List):
                 logger.error(f"Worker {self.worker_id} received invalid detections format: {type(detections)}")
                 return None
+            detections = [i.get('bbox', []) for i in detections]
             pose_output, _ = self.pose_model(deserializer_frame, detections)
             if pose_output is None or len(pose_output) == 0:
                 logger.warning(f"Worker {self.worker_id} received empty pose output")

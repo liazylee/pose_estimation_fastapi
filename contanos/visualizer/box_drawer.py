@@ -57,24 +57,21 @@ def draw_boxes_on_frame(frame: np.ndarray,
     if not isinstance(frame, np.ndarray):
         raise ValueError("Frame must be a numpy array")
     s_track_id = 1
+    # detections=['bbox': [x1, y1, x2, y2], 'track_id': track_id, ]
+
     for detection in detections:
-
-        if len(detection) < 4:
-            continue  # Skip invalid bounding boxes
-
-        x1, y1, x2, y2 = [int(coord * scale) for coord in detection]
-
-        # Draw rectangle
-        cv.rectangle(frame, (x1, y1), (x2, y2), color=(0, 255, 0), thickness=1)
-        track_id = None
-        # todo :  get real track_id from detection later
+        bbox = detection.get('bbox', [])
+        if len(bbox) < 4:
+            continue
+        x1, y1, x2, y2 = [int(coord * scale) for coord in bbox[:4]]
+        track_id = detection.get('track_id', None)
+        if not track_id:
+            track_id = s_track_id
+            s_track_id += 1
+        # draw the bounding box
+        cv.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
         if draw_labels:
-            # Create label with available information
-            if track_id is not None:
-                label = f"ID: {track_id}"
-            else:
-                # If no track_id, show confidence and class name
-                label = f"ID: {s_track_id}"
-                s_track_id += 1
-            cv.putText(frame, label, (x1, y1 - 10), cv.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            label = f"ID: {track_id}"
+            cv.putText(frame, label, (x1, y1 - 5), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
     return frame

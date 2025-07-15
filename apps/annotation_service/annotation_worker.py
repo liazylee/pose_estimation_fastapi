@@ -3,7 +3,7 @@ annotation worker.py
 """
 import logging
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 
 import cv2
 import numpy as np
@@ -92,7 +92,7 @@ class AnnotationWorker(BaseWorker):
             logging.error(f"AnnotationWorker {self.worker_id} prediction error: {e}")
             return None
 
-    def _draw_annotations(self, frame: np.ndarray, detections: list, pose_estimations: list = None) -> np.ndarray:
+    def _draw_annotations(self, frame: np.ndarray, detections: List, pose_estimations: List = None) -> np.ndarray:
         """Draw annotations on the frame."""
         try:
             # Create a copy to avoid modifying the original frame
