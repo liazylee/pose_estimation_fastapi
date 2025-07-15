@@ -163,7 +163,7 @@ annotation:
     width: 1920
     height: 1080
     fps: 25
-    codec: "avc1"  # Use libx264 for better compatibility
+    codec: "mp4v"  # Use libx264 for better compatibility
     preset: "fast"     # FFmpeg preset: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
     crf: 23           # Constant Rate Factor: 0-51 (lower = better quality, 23 is good balance)
     bitrate: "4000k"  # Target bitrate

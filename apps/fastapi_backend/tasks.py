@@ -1,14 +1,6 @@
 # Background Tasks for Video Processing
 # This module contains the core video processing pipeline logic
 
-# TODO: Implement process_video_task function:
-# - Extract frames from uploaded video
-# - Publish frames to Kafka raw_frames topic
-# - Monitor processing pipeline completion
-# - Clean up resources after task completion
-
-# TODO: Add error handling and retry logic
-# TODO: Add progress tracking functionality 
 """
 Background tasks for video processing pipeline.
 """

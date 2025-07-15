@@ -28,21 +28,25 @@ This project provides a modular pose estimation pipeline built with **FastAPI** 
 ### Running Services
 
 Kafka, Zookeeper and an RTSP server are defined in `docker/compose.yaml`:
+
 ```bash
 docker compose up -d
 ```
 
 Start all AI services at once:
+
 ```bash
 python start_services.py
 ```
 
 To run a single service:
+
 ```bash
 python start_services.py yolox       # or rtmpose / annotation
 ```
 
 The services will be available at:
+
 - **YOLOX** – http://localhost:8001
 - **RTMPose** – http://localhost:8002
 - **Annotation** – http://localhost:8003
@@ -61,9 +65,11 @@ The repository includes several markdown documents detailing the design:
 ## Running Tests
 
 Install the development dependencies and run:
+
 ```bash
 pytest -q
 ```
+
 (Some unit tests require Kafka and heavy model downloads.)
 
 ## Contributing

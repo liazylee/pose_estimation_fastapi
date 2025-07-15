@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """
-AI服务启动脚本
-支持启动单个服务或所有服务
+AI startup script for launching multiple AI services.
 """
 
 import argparse
@@ -12,149 +11,157 @@ from pathlib import Path
 
 SERVICES = {
     "yolox": {
-        "path": "apps/yolox_service", 
+        "path": "apps/yolox_service",
         "port": 8001,
-        "description": "YOLOX物体检测服务"
+        "description": "YOLOX detection service"
     },
     "rtmpose": {
         "path": "apps/rtmpose_service",
-        "port": 8002, 
-        "description": "RTMPose姿态估计服务"
+        "port": 8002,
+        "description": "RTMPose service"
     },
     "annotation": {
         "path": "apps/annotation_service",
-        "port": 8003,
-        "description": "视频标注服务"
+        "port": 8004,
+        "description": "annotation service"
+    },
+    "backend": {
+        "path": "apps/fastapi_backend",
+        "port": 8000,
+        "description": "backend service"
     }
 }
 
+
 def start_service(service_name, host="0.0.0.0", reload=False):
-    """启动单个服务"""
     if service_name not in SERVICES:
-        print(f"错误: 未知服务 '{service_name}'")
-        print(f"可用服务: {', '.join(SERVICES.keys())}")
+        print(f"error:  unknow error '{service_name}'")
+        print(f"valid services are: {', '.join(SERVICES.keys())}")
         return False
-    
+
     service = SERVICES[service_name]
-    print(f"启动 {service['description']} (端口 {service['port']})...")
-    
+    print(f"launching {service['description']} on port {service['port']}...")
+
     cmd = [
         sys.executable, "main.py",
         "--host", host,
         "--port", str(service['port'])
     ]
-    
+
     if reload:
         cmd.append("--reload")
-    
+
     try:
-        # 改变到服务目录
+
         cwd = Path(service['path'])
         if not cwd.exists():
-            print(f"错误: 服务目录 {service['path']} 不存在")
+            print(f"error: directory '{service['path']}' does not exist")
             return False
-            
+
         subprocess.run(cmd, cwd=cwd, check=True)
         return True
     except subprocess.CalledProcessError as e:
-        print(f"启动服务失败: {e}")
+        print(f" launching {service['description']} failed: {e}")
         return False
     except KeyboardInterrupt:
-        print(f"\n{service['description']} 被用户中断")
+        print(f"\n{service['description']} stopped by user")
         return True
 
+
 def start_all_services(host="0.0.0.0", reload=False):
-    """启动所有服务（并发）"""
-    print("启动所有AI服务...")
-    
+    """Start all AI services defined in the SERVICES dictionary."""
+    print("starting all AI services...")
+
     processes = []
     for service_name, service in SERVICES.items():
-        print(f"启动 {service['description']} (端口 {service['port']})...")
-        
+        print(f"launching  {service['description']} (port {service['port']})...")
+
         cmd = [
             sys.executable, "main.py",
             "--host", host,
             "--port", str(service['port'])
         ]
-        
+
         if reload:
             cmd.append("--reload")
-        
+
         try:
             cwd = Path(service['path'])
             if not cwd.exists():
-                print(f"错误: 服务目录 {service['path']} 不存在")
+                print(f"error: directory '{service['path']}' does not exist")
                 continue
-                
+
             proc = subprocess.Popen(cmd, cwd=cwd)
             processes.append((service_name, proc))
-            time.sleep(1)  # 错开启动时间
+            time.sleep(1)  #
         except Exception as e:
-            print(f"启动 {service_name} 失败: {e}")
-    
+            print(f"error:  launching {service['description']} failed: {e}")
+
     if not processes:
-        print("没有成功启动任何服务")
+        print("there are no services to start")
         return
-    
-    print(f"\n成功启动 {len(processes)} 个服务:")
+
+    print(f"\n there are {len(processes)} services running:")
     for service_name, proc in processes:
         service = SERVICES[service_name]
         print(f"  - {service['description']}: http://{host}:{service['port']}")
-    
-    print("\n按 Ctrl+C 停止所有服务")
-    
+
+    print("\ninterrupt the script to stop all services")
+
     try:
-        # 等待所有进程
+
         for _, proc in processes:
             proc.wait()
     except KeyboardInterrupt:
-        print("\n正在停止所有服务...")
+        print("\nStopping all services...")
         for service_name, proc in processes:
-            print(f"停止 {service_name}...")
+            print(f"stoping {service_name}...")
             proc.terminate()
-        
+
         # 等待进程结束
         for _, proc in processes:
             proc.wait()
-        print("所有服务已停止")
+        print("all services stopped successfully")
+
 
 def main():
-    parser = argparse.ArgumentParser(description="AI服务启动脚本")
+    parser = argparse.ArgumentParser(description="AI service startup script")
     parser.add_argument(
-        "service", 
-        nargs="?", 
+        "service",
+        nargs="?",
         choices=list(SERVICES.keys()) + ["all"],
         default="all",
-        help="要启动的服务 (默认: all)"
+        help="start a specific service or 'all' to start all services (default: all)"
     )
     parser.add_argument(
-        "--host", 
-        default="0.0.0.0", 
-        help="绑定主机 (默认: 0.0.0.0)"
+        "--host",
+        default="0.0.0.0",
+        help="blind to a specific host (default:0.0.0.0)"
     )
     parser.add_argument(
-        "--reload", 
-        action="store_true", 
-        help="启用自动重载"
+        "--reload",
+        action="store_true",
+        help="enable auto-reload for development (default: False, only works with uvicorn)"
     )
     parser.add_argument(
-        "--list", 
-        action="store_true", 
-        help="列出所有可用服务"
+        "--list",
+        action="store_true",
+        help="list available AI services and their ports"
     )
-    
+
     args = parser.parse_args()
-    
+
     if args.list:
-        print("可用的AI服务:")
+        print("Available AI services:")
         for name, service in SERVICES.items():
-            print(f"  {name:12} - {service['description']} (端口 {service['port']})")
+            print(f"  {name:12} - {service['description']} (port {service['port']})")
         return
-    
+
     if args.service == "all":
         start_all_services(args.host, args.reload)
     else:
         start_service(args.service, args.host, args.reload)
 
+
 if __name__ == "__main__":
-    main() 
+    main()
