@@ -4,32 +4,26 @@
 """
 Background tasks for video processing pipeline.
 """
+import asyncio
 import logging
-import time
 from datetime import datetime, timezone
 from typing import Dict
 
 from kafka_controller import KafkaController
 from schemas import TaskStatus
-from video_utils import extract_frames_and_publish
+from video_utils import extract_and_publish_async
 
 logger = logging.getLogger(__name__)
 
 
-def process_video_task(task_id: str,
-                       video_path: str,
-                       kafka_controller: KafkaController,
-                       status_db: Dict[str, TaskStatus]):
+async def process_video_task(task_id: str,
+                             video_path: str,
+                             kafka_controller: KafkaController,
+                             status_db: Dict[str, TaskStatus]):
     """
-    Main background task for processing uploaded video.
-    
-    Args:
-        task_id: Unique task identifier
-        video_path: Path to uploaded video
-        kafka_controller: Kafka controller instance
-        status_db: Task status database
+    Async background task to process uploaded video and stream it to Kafka.
     """
-    logger.info(f"Starting video processing for task {task_id}")
+    logger.info(f"🚀 Starting video processing for task {task_id}")
 
     try:
         # Update status to processing
@@ -39,12 +33,13 @@ def process_video_task(task_id: str,
             status_db[task_id].updated_at = datetime.now(timezone.utc)
 
         # Extract and publish frames
-        logger.info(f"Extracting frames from {video_path}")
-        extract_frames_and_publish(
+        # Extract and publish video segments to Kafka
+        logger.info(f"🎞 Extracting & publishing from {video_path}")
+        await extract_and_publish_async(
             video_path=video_path,
             task_id=task_id,
-            skip_frames=0,  # Process all frames
-            jpeg_quality=85
+            segment_time=2.0,
+            bootstrap_servers=kafka_controller.bootstrap_servers
         )
 
         # Update progress
@@ -54,11 +49,11 @@ def process_video_task(task_id: str,
 
         # Wait for AI services to process
         # In production, this would monitor the bytetrack topic for completion
-        logger.info("Waiting for AI services to complete processing...")
 
         # TODO: Implement proper completion detection
         # For now, we'll simulate with a timeout
-        wait_for_completion(task_id, timeout_seconds=120, status_db=status_db)
+        logger.info("📡 Waiting for AI services to complete processing...")
+        await wait_for_completion(task_id, timeout_seconds=120, status_db=status_db)
 
         # Generate output file path
         # output_path = Path(f"/tmp/video_outputs/{task_id}_output.mp4")
@@ -68,57 +63,46 @@ def process_video_task(task_id: str,
         if task_id in status_db:
             status_db[task_id].status = "completed"
             status_db[task_id].progress = 100
-            # status_db[task_id].output_file = str(output_path)
             status_db[task_id].updated_at = datetime.now(timezone.utc)
 
-        logger.info(f"Task {task_id} completed successfully")
+        logger.info(f"✅ Task {task_id} completed successfully.")
 
         # Schedule topic cleanup
-        kafka_controller.delete_topics_for_task(task_id, delay_seconds=60 * 60 * 2)
+        kafka_controller.delete_topics_for_task(task_id, delay_seconds=2 * 60 * 60)
+
 
     except Exception as e:
-        logger.error(f"Error processing task {task_id}: {e}")
+
+        logger.error(f"❌ Error processing task {task_id}: {e}")
 
         if task_id in status_db:
             status_db[task_id].status = "failed"
+
             status_db[task_id].error = str(e)
+
             status_db[task_id].updated_at = datetime.now(timezone.utc)
 
-        # Clean up topics on failure
-        kafka_controller.delete_topics_for_task(task_id, delay_seconds=10 * 60 * 3)
+        kafka_controller.delete_topics_for_task(task_id, delay_seconds=10 * 60)
 
 
-def wait_for_completion(task_id: str,
-                        timeout_seconds: int = 300,
-                        status_db: Dict[str, TaskStatus] = None):
+async def wait_for_completion(task_id: str,
+                              timeout_seconds: int = 300,
+                              status_db: Dict[str, TaskStatus] = None):
     """
-    Wait for AI pipeline to complete processing.
-    
-    This is a placeholder implementation. In production, this would:
-    1. Monitor the bytetrack_{task_id} topic for completion signals
-    2. Track frame processing progress
-    3. Detect when all frames have been processed
-    
-    Args:
-        task_id: Task identifier
-        timeout_seconds: Maximum wait time
-        status_db: Optional status database for progress updates
+    Async wait for downstream services to process the video (simulated).
+    In real system: monitor Kafka topic progress or completion flag.
     """
-    start_time = time.time()
-    check_interval = 5  # seconds
+    start_time = asyncio.get_event_loop().time()
+    check_interval = 5
 
-    while time.time() - start_time < timeout_seconds:
-        # Simulate progress updates
-        elapsed = time.time() - start_time
+    while asyncio.get_event_loop().time() - start_time < timeout_seconds:
+        elapsed = asyncio.get_event_loop().time() - start_time
         progress = min(50 + (elapsed / timeout_seconds) * 40, 90)
 
         if status_db and task_id in status_db:
             status_db[task_id].progress = int(progress)
             status_db[task_id].updated_at = datetime.now(timezone.utc)
 
-        # TODO: Check actual completion by monitoring Kafka topics
-        # Example: Check if annotation service has processed all frames
+        await asyncio.sleep(check_interval)
 
-        time.sleep(check_interval)
-
-    logger.info(f"Completion wait finished for task {task_id}")
+    logger.info(f"⌛️ Completion wait finished for task {task_id}")

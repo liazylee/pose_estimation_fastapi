@@ -2,20 +2,20 @@
 Video processing routes.
 Handles video upload, processing, and result retrieval.
 """
+import asyncio
 import os
 import shutil
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
-
-from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException
-from fastapi.responses import JSONResponse, FileResponse
 
 from config import UPLOAD_DIR, ALLOWED_VIDEO_EXTENSIONS, RTSP_BASE_URL, logger
 from dependencies import get_kafka_controller, get_rtsp_manager, get_ai_orchestrator
+from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException
+from fastapi.responses import JSONResponse, FileResponse
 from models import get_task_status_db, update_task_status
 from schemas import TaskResponse, TaskStatus
+
 from tasks import process_video_task
 
 router = APIRouter()
@@ -43,12 +43,12 @@ async def upload_video(
             status_code=400,
             detail=f"Invalid file type. Allowed: {ALLOWED_VIDEO_EXTENSIONS}"
         )
-    
+
     # if filename already exists, replace it
     if (UPLOAD_DIR / file.filename).exists():
         logger.warning(f"File {file.filename} already exists, replacing it.")
         os.remove(UPLOAD_DIR / file.filename)
-    
+
     # Generate unique task ID
     task_id = str(uuid.uuid4())
 
@@ -83,24 +83,19 @@ async def upload_video(
         error=None
     )
     update_task_status(task_id, task_status)
-    
+
     # Create RTSP stream from the uploaded video
-    try:
-        stream_url = rtsp_manager.create_stream_from_video(task_id, str(file_path))
-        logger.info(f"Created RTSP stream for task {task_id}: {stream_url}")
-    except Exception as e:
-        logger.error(f"Failed to create RTSP stream for task {task_id}: {e}")
-        # Continue without RTSP stream
+    # try:
+    #     stream_url = rtsp_manager.create_stream_from_video(task_id, str(file_path))
+    #     logger.info(f"Created RTSP stream for task {task_id}: {stream_url}")
+    # except Exception as e:
+    #     logger.error(f"Failed to create RTSP stream for task {task_id}: {e}")
+    #     # Continue without RTSP stream
 
-    # Launch background processing
-    background_tasks.add_task(
-        process_video_task,
-        task_id=task_id,
-        video_path=str(file_path),
-        kafka_controller=kafka_controller,
-        status_db=task_status_db
+    asyncio.create_task(
+        process_video_task(task_id, file_path, kafka_controller, task_status)
     )
-
+    logger.info(f"Processed upload file: {file_path}")
     # Start AI pipeline for the task
     try:
         logger.info(f"Starting AI pipeline for uploaded video task {task_id}")
@@ -111,7 +106,7 @@ async def upload_video(
             logger.warning(f"AI pipeline failed to start for task {task_id}: {ai_result.get('errors', [])}")
     except Exception as e:
         logger.error(f"Error starting AI pipeline for task {task_id}: {e}")
-        # Don't fail the upload if AI pipeline fails to start
+    # Don't fail the upload if AI pipeline fails to start
 
     # Return response
     return TaskResponse(
@@ -133,7 +128,7 @@ async def get_task_status(task_id: str):
         Task status information
     """
     task_status_db = get_task_status_db()
-    
+
     if task_id not in task_status_db:
         raise HTTPException(status_code=404, detail="Task not found")
 
@@ -160,7 +155,7 @@ async def get_result(task_id: str):
         Video file or redirect to stream
     """
     task_status_db = get_task_status_db()
-    
+
     if task_id not in task_status_db:
         raise HTTPException(status_code=404, detail="Task not found")
 
@@ -189,4 +184,4 @@ async def get_result(task_id: str):
             "message": "Output available via RTSP stream",
             "stream_url": f"{RTSP_BASE_URL}/{task_id}"
         }
-    ) 
+    )

@@ -1,5 +1,7 @@
+aiokafka==0.12.0
 annotated-types==0.7.0
 anyio==4.9.0
+async-timeout==5.0.1
 asyncio-mqtt==0.16.2
 av==14.4.0
 certifi==2025.6.15
@@ -18,7 +20,6 @@ humanfriendly==10.0
 idna==3.10
 iniconfig==2.1.0
 Jinja2==3.1.6
-kafka-python==2.2.15
 MarkupSafe==3.0.2
 mpmath==1.3.0
 networkx==3.5
@@ -43,7 +44,7 @@ packaging==25.0
 paho-mqtt==2.1.0
 pillow==11.3.0
 pluggy==1.6.0
--e git+https://github.com/liazylee/pose_estimation_fastapi.git@ea9dbef1fb0aa95f28bb2c13509bf8aaa2245ea0#egg=pose_estimation_fastapi
+-e git+https://github.com/liazylee/pose_estimation_fastapi.git@d41bfdf0811147c961c810c549d61d0e1aeaadeb#egg=pose_estimation_fastapi
 protobuf==6.31.1
 pydantic==2.11.7
 pydantic_core==2.33.2
