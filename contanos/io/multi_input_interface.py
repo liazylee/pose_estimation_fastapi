@@ -8,7 +8,7 @@ from typing import Any, List, Dict
 class MultiInputInterface:
     """Wrapper for multiple input interfaces with synchronized multi-entry queue."""
 
-    def __init__(self, interfaces: List[Any], frame_timeout_sec: float = 5.0):
+    def __init__(self, interfaces: List[Any], frame_timeout_sec: float = 20):
         self.interfaces = interfaces
         self.is_running = False
         self._executor = ThreadPoolExecutor(max_workers=len(interfaces))
@@ -52,6 +52,7 @@ class MultiInputInterface:
         while self.is_running:
             try:
                 data = await interface.read_data()
+
                 if data is None:
                     logging.warning(f"Interface {interface_idx} returned None, skipping")
                     continue
@@ -79,7 +80,6 @@ class MultiInputInterface:
                         await self._queue.put(self._data_dict[frame_id])
                         del self._data_dict[frame_id]
                         self._frame_id_order.remove(frame_id)
-
             except Exception as e:
                 logging.error(f"Interface {interface_idx} error: {e}")
                 await asyncio.sleep(1)  # Prevent tight loop on error

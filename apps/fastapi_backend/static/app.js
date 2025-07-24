@@ -63,10 +63,10 @@ async function uploadFile() {
         // Update UI with result
         currentTaskId = result.task_id;
         document.getElementById('currentTaskId').textContent = currentTaskId;
-        
+
         // Show current task info section
         document.getElementById('currentTaskInfo').style.display = 'block';
-        
+
         // Refresh stream status using only /streams/{task_id}/status
         await refreshStreamStatus();
 
@@ -114,20 +114,20 @@ async function refreshStreamStatus() {
         const response = await fetch(`/streams/${currentTaskId}/status`);
         if (response.ok) {
             const data = await response.json();
-            
+
             // Update stream status
             document.getElementById('streamStatus').textContent = data.active ? 'Active' : 'Inactive';
-            
+
             // Update stream URLs
             const origUrl = data.rtsp_url || 'None';
             const procUrl = data.annotations_rtsp_url || 'None';
             document.getElementById('originalStreamUrl').textContent = origUrl;
             document.getElementById('processedStreamUrl').textContent = procUrl;
-            
+
             // Update video elements
             const origVideo = document.getElementById('originalVideo');
             const procVideo = document.getElementById('processedVideo');
-            
+
             if (origUrl !== 'None') {
                 origVideo.src = origUrl;
                 // Enable original stream controls
@@ -135,18 +135,17 @@ async function refreshStreamStatus() {
                 document.getElementById('loadOriginalStreamBtn').disabled = false;
                 document.getElementById('stopOriginalStreamBtn').disabled = false;
             }
-            
+
             if (procUrl !== 'None') {
-                procVideo.src = procUrl;
-                // Enable processed stream controls
-                document.getElementById('copyProcessedStreamBtn').disabled = false;
-                document.getElementById('loadProcessedStreamBtn').disabled = false;
-                document.getElementById('refreshProcessedStreamBtn').disabled = false;
+                const streamName = procUrl.split('/').pop();  // 从 rtsp://localhost:8554/mystream 获取 "mystream"
+                const webrtcUrl = `https://localhost:8889/stream/webrtc/${streamName}`;
+
+                document.getElementById('processedVideoWebRTC').src = webrtcUrl;
             }
-            
+
             // Update processing status
             document.getElementById('processingStatus').textContent = data.active ? 'Processing' : 'Completed';
-            
+
         } else {
             document.getElementById('streamStatus').textContent = 'Inactive';
             document.getElementById('processingStatus').textContent = 'Error';
@@ -300,7 +299,7 @@ async function refreshSystemInfo() {
         } else {
             document.getElementById('serverStatus').textContent = 'Unhealthy';
         }
-        
+
         // Get active streams count
         try {
             const streamsResponse = await fetch('/streams/active');
@@ -311,7 +310,7 @@ async function refreshSystemInfo() {
         } catch (e) {
             document.getElementById('activeStreamCount').textContent = 'Unknown';
         }
-        
+
     } catch (error) {
         console.error('Failed to refresh system info:', error);
         document.getElementById('serverStatus').textContent = 'Error';

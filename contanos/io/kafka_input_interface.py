@@ -8,14 +8,20 @@ from asyncio import Queue
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict, Optional
 
+import numpy as np
+
+from contanos.utils.serializers import encode_frame_to_base64
+
+logger = logging.getLogger(__name__)
 try:
     from kafka import KafkaConsumer
     from kafka.errors import KafkaError
+    from kafka.consumer.fetcher import ConsumerRecord
 
     KAFKA_AVAILABLE = True
 except ImportError:
     KAFKA_AVAILABLE = False
-    logging.warning("kafka-python not installed. Please install it with: pip install kafka-python")
+    logger.warning("kafka-python not installed. Please install it with: pip install kafka-python")
 
 
 class KafkaInput(ABC):
@@ -54,7 +60,7 @@ class KafkaInput(ABC):
         try:
             self._loop = asyncio.get_running_loop()
 
-            logging.info(f"Starting Kafka consumer for servers {self.bootstrap_servers}")
+            logger.info(f"Starting Kafka consumer for servers {self.bootstrap_servers}")
 
             # Create consumer
             self.consumer = KafkaConsumer(
@@ -65,18 +71,18 @@ class KafkaInput(ABC):
                 max_poll_records=self.max_poll_records,
                 consumer_timeout_ms=self.consumer_timeout_ms,
                 enable_auto_commit=self.enable_auto_commit,
-                value_deserializer=lambda x: x.decode('utf-8') if x else None
-            )
+                key_deserializer=lambda k: k.decode('utf-8') if k else None,
+                value_deserializer=lambda v: v)
 
             # Start consumer task
             self.is_running = True
             self._consumer_task = asyncio.create_task(self._consume_messages())
 
-            logging.info(f"Kafka connection established, subscribed to topic: {self.topic}")
+            logger.info(f"Kafka connection established, subscribed to topic: {self.topic}")
             return True
 
         except Exception as e:
-            logging.error(f"Failed to initialize Kafka input: {e}")
+            logger.error(f"Failed to initialize Kafka input: {e}")
             return False
 
     # kafka consumer background task to poll messages and process them
@@ -89,41 +95,115 @@ class KafkaInput(ABC):
                     self._executor,
                     lambda: self.consumer.poll(timeout_ms=self.consumer_timeout_ms)
                 )
-
-                if messages:
-                    for topic_partition, records in messages.items():
-                        for record in records:
-                            await self._process_and_queue(record)
+                if not messages:
+                    continue
+                for tp, message in messages.items():
+                    for record in message:
+                        #
+                        await self._process_record(record)
 
             except Exception as e:
-                logging.error(f"Error consuming Kafka messages: {e}")
+                logger.error(f"Error consuming Kafka messages: {e}")
                 await asyncio.sleep(1)
 
-    async def _process_and_queue(self, record):
-        """Process and queue a Kafka message."""
+    async def _process_record(self, record: ConsumerRecord):
+        """
+        Process a single Kafka record and queue it for further processing.
+        """
         try:
-            # Process message in executor
-            message = await self._loop.run_in_executor(self._executor, self._process_message, record)
-            if message is not None:
+            message_str = record.value.decode('utf-8')
+            message = json.loads(message_str)
+            if isinstance(message, dict) and 'frame_id' in message:
                 await self.message_queue.put(message)
-        except Exception as e:
-            logging.error(f"Error queuing Kafka message: {e}")
+                return
+        except(UnicodeDecodeError, json.JSONDecodeError):
+            logger.info(f'failed to decode message as json string , try to  decode as bytes')
+            pass
 
-    def _process_message(self, record) -> Optional[Dict[str, Any]]:
-        """
-        """
+        start_frame_id_str = record.key
+        if not start_frame_id_str:
+            logger.warning("Binary message received without a key (start_frame_id). Skipping.")
+            return
+
         try:
-            message = json.loads(record.value)
-            if not isinstance(message, dict):
-                raise ValueError("Kafka message must be a JSON object")
-        except ValueError as e:
-            logging.error(f"Invalid Kafka message format: {e}")
-            return None
-        except json.JSONDecodeError as e:
-            logging.error(f"Failed to decode Kafka message: {e}")
-            return None
+            key_dict = json.loads(record.key)
+            start_frame_id_str = int(key_dict.get('start_frame_id', 0))
+            width = int(key_dict.get('width', 640))
+            height = int(key_dict.get('height', 480))
+            channels = int(key_dict.get('channels', 3))
+            fps = int(key_dict.get('fps', 30))
+            # Submit decoding task to executor
+            await self._loop.run_in_executor(
+                self._executor,
+                self._decode_and_queue_frames,
+                record.value,
+                start_frame_id_str,
+                width,
+                height,
+                channels,
+                fps
 
-        return message
+            )
+        except (ValueError, TypeError) as e:
+            logger.error(f"Error parsing Kafka key: {e}")
+            logger.warning(f"Could not parse start_frame_id from Kafka key: '{start_frame_id_str}'.")
+        except Exception as e:
+            logger.error(f"Error submitting decoding task for start_frame_id {start_frame_id_str}: {e}")
+
+    def _decode_and_queue_frames(self,
+                                 video_segment_bytes: bytes,
+                                 frame_id_start: int,
+                                 width: int,
+                                 height: int,
+                                 channels: int = 3,
+                                 fps: float = 30.0):
+        """
+        Decode video segment and enqueue base64 JPEG frames with metadata.
+        """
+        frame_size = width * height * channels
+        pix_fmt = 'bgr24'
+
+        ffmpeg_cmd = [
+            'ffmpeg', '-hide_banner', '-loglevel', 'error',
+            '-i', 'pipe:0',
+            '-f', 'rawvideo',
+            '-pix_fmt', pix_fmt,
+            'pipe:1'
+        ]
+
+        import subprocess
+        proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+
+        try:
+            stdout_data, _ = proc.communicate(input=video_segment_bytes)
+        except Exception as e:
+            logger.error(f"FFmpeg decode failed at frame {frame_id_start}: {e}")
+            return
+
+        frame_index = 0
+        for i in range(0, len(stdout_data), frame_size):
+            chunk = stdout_data[i: i + frame_size]
+            if len(chunk) != frame_size:
+                continue
+
+            frame_np = np.frombuffer(chunk, dtype=np.uint8).reshape((height, width, channels))
+            b64_bytes = encode_frame_to_base64(frame_np, quality=85)
+            frame_id = frame_id_start + frame_index
+            timestamp = time.strftime('%Y-%m-%dT%H:%M:%S.', time.gmtime()) + f"{int(time.time() % 1 * 1e6):06}Z"
+
+            message = {
+                "task_id": "default_task",
+                "frame_id": frame_id,
+                "timestamp": timestamp,
+                "image_format": "jpeg",
+                "image_bytes": b64_bytes
+            }
+            # logger.info(f'frame_id = {frame_id}')
+            asyncio.run_coroutine_threadsafe(self.message_queue.put(message), self._loop)
+            # logger.info(f'self.message_queue.qsize() = {self.message_queue.qsize()}')
+            frame_index += 1
+
+        logger.info(f"Decoded {frame_index} frames starting from frame {frame_id_start}")
 
     async def read_data(self) -> Optional[Dict[str, Any]]:
         """Read message from queue."""
@@ -134,13 +214,13 @@ class KafkaInput(ABC):
             message = await asyncio.wait_for(self.message_queue.get(), timeout=self.consumer_timeout_ms)
             return message
         except asyncio.TimeoutError:
-            logging.warning("Timeout waiting for Kafka message")
+            logger.warning("Timeout waiting for Kafka message")
             raise
         except asyncio.CancelledError:
-            logging.info("Kafka input read_data task cancelled")
+            logger.info("Kafka input read_data task cancelled")
             raise
         except Exception as e:
-            logging.error(f"Error reading Kafka message: {e}")
+            logger.error(f"Error reading Kafka message: {e}")
             raise
         finally:
             if message is not None:
@@ -154,14 +234,14 @@ class KafkaInput(ABC):
             try:
                 await self._loop.run_in_executor(self._executor, self.consumer.close)
             except KafkaError as e:
-                logging.error(f"Error closing Kafka consumer: {e}")
+                logger.error(f"Error closing Kafka consumer: {e}")
         # Cancel consumer task
         if self._consumer_task:
             self._consumer_task.cancel()
             try:
                 await self._consumer_task
             except asyncio.CancelledError:
-                logging.info("Kafka consumer task cancelled")
+                logger.info("Kafka consumer task cancelled")
 
         # Shutdown executor
         self._executor.shutdown(wait=True)
@@ -174,4 +254,4 @@ class KafkaInput(ABC):
             except asyncio.QueueEmpty:
                 break
 
-        logging.info("Kafka input cleaned up")
+        logger.info("Kafka input cleaned up")

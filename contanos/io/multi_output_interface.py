@@ -68,7 +68,7 @@ class MultiOutputInterface:
         while self.is_running:
             try:
                 try:
-                    frame = await asyncio.wait_for(self._raw_queue.get(), timeout=1.0)
+                    frame = await asyncio.wait_for(self._raw_queue.get(), timeout=2.0)
                 except asyncio.TimeoutError:
                     continue
 
@@ -79,7 +79,7 @@ class MultiOutputInterface:
                     continue
 
                 if self._expected_frame_id is None:
-                    self._expected_frame_id = frame_id
+                    self._expected_frame_id = 0
 
                 if frame_id < self._expected_frame_id:
                     logging.warning(f"Dropping old frame {frame_id}, expecting {self._expected_frame_id}")

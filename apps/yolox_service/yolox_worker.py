@@ -28,7 +28,7 @@ class YOLOXWorker(BaseWorker):
         try:
             # Create model configuration
             device = self.device
-            if self.device.startswith('cuda:'):
+            if self.device.startswith('cuda'):
                 device = 'cuda'
             model_config = self.model_config
             # Handle different model configuration formats

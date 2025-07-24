@@ -1,4 +1,6 @@
 import asyncio
+import json
+import json as pyjson
 import logging
 import math
 
@@ -34,9 +36,9 @@ class RTSPStreamManager:
         }
 
 
-async def get_duration_and_fps(video_path: str):
-    """Get video duration and FPS using async ffprobe."""
-    # Get duration
+async def get_video_metadata(video_path: str):
+    """Get duration, fps, width, height from video using ffprobe."""
+    # Duration
     proc1 = await asyncio.create_subprocess_exec(
         'ffprobe', '-v', 'error',
         '-select_streams', 'v:0',
@@ -48,7 +50,7 @@ async def get_duration_and_fps(video_path: str):
     stdout1, _ = await proc1.communicate()
     duration = float(stdout1.decode().strip())
 
-    # Get FPS
+    # FPS
     proc2 = await asyncio.create_subprocess_exec(
         'ffprobe', '-v', 'error',
         '-select_streams', 'v:0',
@@ -61,7 +63,22 @@ async def get_duration_and_fps(video_path: str):
     fps_parts = stdout2.decode().strip().split('/')
     fps = float(fps_parts[0]) / float(fps_parts[1]) if len(fps_parts) == 2 else float(fps_parts[0])
 
-    return duration, fps
+    # Width and Height
+    proc3 = await asyncio.create_subprocess_exec(
+        'ffprobe', '-v', 'error',
+        '-select_streams', 'v:0',
+        '-show_entries', 'stream=width,height',
+        '-of', 'json',
+        video_path,
+        stdout=asyncio.subprocess.PIPE
+    )
+    stdout3, _ = await proc3.communicate()
+
+    info = pyjson.loads(stdout3.decode())
+    width = info['streams'][0]['width']
+    height = info['streams'][0]['height']
+
+    return duration, fps, width, height
 
 
 async def extract_and_publish_async(video_path: str,
@@ -69,15 +86,14 @@ async def extract_and_publish_async(video_path: str,
                                     segment_time: float = 2.0,
                                     bootstrap_servers: str = 'localhost:9092'):
     """Async version: stream video segments to Kafka with preserved codec."""
-
-    duration, fps = await get_duration_and_fps(video_path)
+    duration, fps, width, height = await get_video_metadata(video_path)
     segment_count = math.ceil(duration / segment_time)
+    channels = 3  # assuming bgr24
 
     producer = AIOKafkaProducer(
         bootstrap_servers=bootstrap_servers,
         acks='all',
-        max_request_size=10 * 1024 * 1024,  # 10 MB
-
+        max_request_size=10 * 1024 * 1024,
     )
     await producer.start()
 
@@ -88,6 +104,7 @@ async def extract_and_publish_async(video_path: str,
             start_time = segment_idx * segment_time
             global_frame_idx = int(start_time * fps)
 
+            # Extract video segment
             ffmpeg_proc = await asyncio.create_subprocess_exec(
                 'ffmpeg',
                 '-ss', str(start_time),
@@ -100,17 +117,24 @@ async def extract_and_publish_async(video_path: str,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL
             )
-
             stdout, _ = await ffmpeg_proc.communicate()
 
             if not stdout:
-                logger.warning(f"Failed to extract video segment {segment_idx}")
+                logger.warning(f"[{task_id}] Segment {segment_idx} is empty, skipping...")
                 continue
 
-            kafka_key = f"{global_frame_idx}".encode()
-            await producer.send_and_wait(topic, key=kafka_key, value=stdout, )
-            logger.info(f"Extracted video segment {segment_idx}")
+            # Construct metadata key (JSON string)
+            kafka_key = json.dumps({
+                "frame_id_start": global_frame_idx,
+                "width": width,
+                "height": height,
+                "channels": channels,
+                "fps": fps
+            }).encode()
+
+            await producer.send_and_wait(topic, key=kafka_key, value=stdout)
+            logger.info(f"[{task_id}] ✅ Sent segment {segment_idx} (frame {global_frame_idx})")
 
     finally:
         await producer.stop()
-        logger.info(f"Extracted video segment {segment_count}")
+        logger.info(f"[{task_id}] ✅ All {segment_count} segments sent.")

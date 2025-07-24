@@ -41,7 +41,9 @@
         <div class="stream-info">
             <div>Original RTSP URL: <span id="originalStreamUrl">None</span></div>
             <div style="margin-top: 0.5rem;">
-                <button onclick="copyOriginalStreamUrl()" class="btn-secondary" id="copyOriginalStreamBtn" disabled>Copy Stream URL</button>
+                <button onclick="copyOriginalStreamUrl()" class="btn-secondary" id="copyOriginalStreamBtn" disabled>Copy
+                    Stream URL
+                </button>
                 <button onclick="refreshStreamStatus()" class="btn-secondary">Refresh Status</button>
             </div>
         </div>
@@ -50,8 +52,12 @@
                 Your browser does not support the video tag.
             </video>
             <div class="stream-controls">
-                <button onclick="loadOriginalStream()" class="btn-primary" id="loadOriginalStreamBtn" disabled>Load Stream</button>
-                <button onclick="stopOriginalStream()" class="btn-danger" id="stopOriginalStreamBtn" disabled>Stop Stream</button>
+                <button onclick="loadOriginalStream()" class="btn-primary" id="loadOriginalStreamBtn" disabled>Load
+                    Stream
+                </button>
+                <button onclick="stopOriginalStream()" class="btn-danger" id="stopOriginalStreamBtn" disabled>Stop
+                    Stream
+                </button>
             </div>
         </div>
     </div>
@@ -62,16 +68,28 @@
         <div class="stream-info">
             <div>Processed RTSP URL: <span id="processedStreamUrl">None</span></div>
             <div style="margin-top: 0.5rem;">
-                <button onclick="copyProcessedStreamUrl()" class="btn-secondary" id="copyProcessedStreamBtn" disabled>Copy Stream URL</button>
-                <button onclick="refreshProcessedStream()" class="btn-secondary" id="refreshProcessedStreamBtn" disabled>Refresh Stream</button>
+                <button onclick="copyProcessedStreamUrl()" class="btn-secondary" id="copyProcessedStreamBtn" disabled>
+                    Copy Stream URL
+                </button>
+                <button onclick="refreshProcessedStream()" class="btn-secondary" id="refreshProcessedStreamBtn"
+                        disabled>Refresh Stream
+                </button>
             </div>
         </div>
         <div style="margin-top: 1rem;">
-            <video id="processedVideo" controls autoplay muted style="width: 100%; max-height: 250px; background: #000;">
-                Your browser does not support the video tag.
-            </video>
+            <iframe id="processedVideoWebRTC"
+                    style="width: 100%; max-height: 250px; background: #000; border: none;"
+                    allow="camera; microphone; fullscreen"
+                    src=""
+                    allowfullscreen>
+            </iframe>
+            <!--            <video id="processedVideo" controls autoplay muted style="width: 100%; max-height: 250px; background: #000;">-->
+            <!--                Your browser does not support the video tag.-->
+            <!--            </video>-->
             <div class="stream-controls">
-                <button onclick="loadProcessedStream()" class="btn-primary" id="loadProcessedStreamBtn" disabled>Load Stream</button>
+                <button onclick="loadProcessedStream()" class="btn-primary" id="loadProcessedStreamBtn" disabled>Load
+                    Stream
+                </button>
             </div>
         </div>
     </div>

@@ -277,45 +277,45 @@ class AIServiceOrchestrator:
             results["success"] = False
 
         # Start RTMPose service
-        # try:
-        #     logger.info(f"Starting RTMPose service for task {task_id}")
-        #     rtmpose_result = await self.rtmpose_client.start_service(
-        #         task_id=task_id,
-        #         config_path=config.get("rtmpose_config") if config else None,
-        #         devices=config.get("rtmpose_devices") if config else None,
-        #         log_level=config.get("log_level") if config else None
-        #     )
-        #     results["services"]["rtmpose"] = rtmpose_result
-        #     logger.info(f"RTMPose service started successfully for task {task_id}")
-        #
-        # except Exception as e:
-        #     error_msg = f"Failed to start RTMPose service: {str(e)}"
-        #     logger.error(error_msg)
-        #     results["errors"].append(error_msg)
-        #     results["services"]["rtmpose"] = {"success": False, "error": error_msg}
-        #     # Don't set overall success=False for RTMPose service failure
-        #
-        # # TODO: Start ByteTrack service when ready
-        #
-        # # Start Annotation service (now implemented)
-        # try:
-        #     logger.info(f"Starting Annotation service for task {task_id}")
-        #     annotation_result = await self.annotation_client.start_service(
-        #         task_id=task_id,
-        #         config_path=config.get("annotation_config") if config else None,
-        #         log_level=config.get("log_level") if config else None,
-        #         max_restarts=config.get("max_restarts") if config else None
-        #     )
-        #     results["services"]["annotation"] = annotation_result
-        #     logger.info(f"Annotation service started successfully for task {task_id}")
-        #
-        # except Exception as e:
-        #     error_msg = f"Failed to start Annotation service: {str(e)}"
-        #     logger.error(error_msg)
-        #     results["errors"].append(error_msg)
-        #     results["services"]["annotation"] = {"success": False, "error": error_msg}
-        #     # Don't set success=False for annotation service failure for now
-        # return results
+        try:
+            logger.info(f"Starting RTMPose service for task {task_id}")
+            rtmpose_result = await self.rtmpose_client.start_service(
+                task_id=task_id,
+                config_path=config.get("rtmpose_config") if config else None,
+                devices=config.get("rtmpose_devices") if config else None,
+                log_level=config.get("log_level") if config else None
+            )
+            results["services"]["rtmpose"] = rtmpose_result
+            logger.info(f"RTMPose service started successfully for task {task_id}")
+
+        except Exception as e:
+            error_msg = f"Failed to start RTMPose service: {str(e)}"
+            logger.error(error_msg)
+            results["errors"].append(error_msg)
+            results["services"]["rtmpose"] = {"success": False, "error": error_msg}
+            # Don't set overall success=False for RTMPose service failure
+
+        # TODO: Start ByteTrack service when ready
+
+        # Start Annotation service (now implemented)
+        try:
+            logger.info(f"Starting Annotation service for task {task_id}")
+            annotation_result = await self.annotation_client.start_service(
+                task_id=task_id,
+                config_path=config.get("annotation_config") if config else None,
+                log_level=config.get("log_level") if config else None,
+                max_restarts=config.get("max_restarts") if config else None
+            )
+            results["services"]["annotation"] = annotation_result
+            logger.info(f"Annotation service started successfully for task {task_id}")
+
+        except Exception as e:
+            error_msg = f"Failed to start Annotation service: {str(e)}"
+            logger.error(error_msg)
+            results["errors"].append(error_msg)
+            results["services"]["annotation"] = {"success": False, "error": error_msg}
+            # Don't set success=False for annotation service failure for now
+        return results
 
     async def stop_pipeline(self, task_id: str) -> Dict[str, Any]:
         """

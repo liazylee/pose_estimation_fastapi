@@ -12,6 +12,25 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 
+def encode_bgr_frame_to_jpeg(frame: np.ndarray, quality: int = 85) -> bytes:
+    """
+    Encode a BGR numpy array frame to JPEG bytes without conversion.
+    """
+    encode_params = [cv2.IMWRITE_JPEG_QUALITY, quality]
+    success, buffer = cv2.imencode('.jpg', frame, encode_params)
+    if not success:
+        raise ValueError("Failed to encode frame to JPEG")
+    return buffer.tobytes()
+
+
+def encode_bgr_frame_to_base64(frame: np.ndarray, quality: int = 85) -> str:
+    """
+    Encode a BGR numpy array frame to base64-encoded JPEG string.
+    """
+    jpeg_bytes = encode_bgr_frame_to_jpeg(frame, quality)
+    return base64.b64encode(jpeg_bytes).decode('utf-8')
+
+
 def encode_frame_to_jpeg(frame: np.ndarray, quality: int = 85) -> bytes:
     """
     Encode a numpy array frame to JPEG bytes.
