@@ -46,14 +46,14 @@ class YOLOXService(BaseAIService):
         input_config = self._get_kafka_input_config()
         logger.info(f"Input topic: {input_config.get('topic')}")
         logger.info(f"Consumer group: {input_config.get('group_id')}")
-        
+
         return [KafkaInput(config=input_config)]
 
     def create_output_interface(self) -> KafkaOutput:
         """Create Kafka output interface for detections."""
         output_config = self._get_kafka_output_config()
         logger.info(f"Output topic: {output_config.get('topic')}")
-        
+
         return KafkaOutput(config=output_config)
 
     def get_model_config(self) -> Dict[str, Any]:
@@ -113,7 +113,7 @@ class YOLOXService(BaseAIService):
             'bootstrap_servers': kafka_config.get('bootstrap_servers'),
             'topic': kafka_config.get('topic'),
             'group_id': kafka_config.get('group_id'),
-            'auto_offset_reset': consumer_settings.get('auto_offset_reset', 'latest'),
+            'auto_offset_reset': consumer_settings.get('auto_offset_reset', 'earliest'),
             'max_poll_records': consumer_settings.get('max_poll_records', 1),
             'consumer_timeout_ms': consumer_settings.get('consumer_timeout_ms', 1000),
             'enable_auto_commit': consumer_settings.get('enable_auto_commit', True)
@@ -200,4 +200,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main())

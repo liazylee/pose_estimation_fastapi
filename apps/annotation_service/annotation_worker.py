@@ -86,6 +86,7 @@ class AnnotationWorker(BaseWorker):
                 },
                 'frame_id': inputs.get('frame_id', None),
                 'task_id': inputs.get('task_id', self.model_config.get('task_id'))
+                
             }
 
         except Exception as e:

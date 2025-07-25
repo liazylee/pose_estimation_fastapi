@@ -28,19 +28,22 @@ class RTSPOutput(ABC):
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=config.get("queue_max_len", 10))
         self.is_running: bool = False
         self._producer_task: asyncio.Task | None = None
+        self._stderr_task: asyncio.Task | None = None
 
     #
     # ───────────────────────────────  PUBLIC API  ────────────────────────────────
     #
     async def _log_ffmpeg_errors(self):
         """Continuously read ffmpeg’s stderr and log it."""
-        assert self.process and self.process.stderr
+        proc = self.process
+        if not proc or not proc.stderr:
+            return
+
         while True:
-            # Read in a thread so we don’t block the event loop
-            line = await asyncio.to_thread(self.process.stderr.readline)
+            line = await asyncio.to_thread(proc.stderr.readline)
             if not line:
                 break
-            logging.error(f"[ffmpeg] {line.decode().rstrip()}")
+            logging.error(f"[ffmpeg] {line.decode(errors='ignore').rstrip()}")
 
     async def initialize(self) -> bool:
         """
@@ -82,8 +85,8 @@ class RTSPOutput(ABC):
                 bufsize=0
             )
             # start logging its stderr
-            asyncio.create_task(self._log_ffmpeg_errors())
-            # --- 3. Kick-off the async producer ---------------------------------
+            self._stderr_task = asyncio.create_task(
+                self._log_ffmpeg_errors())  # --- 3. Kick-off the async producer ---------------------------------
             self.is_running = True
             self._producer_task = asyncio.create_task(self._output_producer())
 
@@ -182,6 +185,13 @@ class RTSPOutput(ABC):
         self.is_running = False
 
         # 1. Stop producer gracefully
+        if self._stderr_task:
+            self._stderr_task.cancel()
+            try:
+                await self._stderr_task
+            except asyncio.CancelledError:
+                pass
+            self._stderr_task = None
         if self._producer_task:
             self._producer_task.cancel()
             try:

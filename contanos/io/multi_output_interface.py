@@ -79,7 +79,7 @@ class MultiOutputInterface:
                     continue
 
                 if self._expected_frame_id is None:
-                    self._expected_frame_id = 0
+                    self._expected_frame_id = frame_id
 
                 if frame_id < self._expected_frame_id:
                     logging.warning(f"Dropping old frame {frame_id}, expecting {self._expected_frame_id}")
@@ -102,8 +102,11 @@ class MultiOutputInterface:
                 heapq.heappop(self._frame_buffer)
                 await self._ordered_queue.put(next_frame)
                 self._expected_frame_id += 1
-            elif len(self._frame_buffer) > 50:
-                logging.warning(f"Skipping to frame {next_id} due to full buffer")
+            elif len(self._frame_buffer) > 200:  # 增加缓冲区阈值从50到200
+                logging.warning(f"Buffer full ({len(self._frame_buffer)} frames), skipping to frame {next_id}")
+                # 只有在极端情况下才跳帧，并记录详细信息
+                missed_frames = next_id - self._expected_frame_id
+                logging.warning(f"Skipped {missed_frames} frames from {self._expected_frame_id} to {next_id}")
                 self._expected_frame_id = next_id
             else:
                 break

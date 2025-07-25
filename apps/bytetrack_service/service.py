@@ -10,8 +10,6 @@ import os
 import sys
 from typing import Dict, Any
 
-import yaml
-
 # Add parent directories to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
@@ -41,11 +39,11 @@ class ByteTrackService:
     def __init__(self, task_id: str, config_path: str = "apps/dev_pose_estimation_config.yaml"):
         self.task_id = task_id
         self.config_path = config_path
-        
+
         # Load configuration
         self.config_loader = ConfigLoader(config_path)
         self.config = self.config_loader.config
-        
+
         # Initialize interfaces
         self.input_interface = None
         self.output_interface = None
@@ -63,7 +61,7 @@ class ByteTrackService:
         """Get devices from configuration."""
         bytetrack_config = self.config.get('bytetrack', {})
         devices_config = bytetrack_config.get('devices', 'cuda')
-        
+
         if isinstance(devices_config, str):
             if devices_config == 'cuda':
                 # Auto-detect CUDA devices
@@ -84,18 +82,18 @@ class ByteTrackService:
     def _get_model_config(self) -> Dict[str, Any]:
         """Get model configuration for ByteTrack."""
         bytetrack_config = self.config.get('bytetrack', {})
-        
+
         model_config = {
             'model_path': bytetrack_config.get('model_path'),
             'model_url': bytetrack_config.get('model_url'),
             'backend': bytetrack_config.get('backend', 'onnxruntime'),
             'device': 'cuda',  # Will be overridden per worker
         }
-        
+
         # Add model-specific parameters
         if 'model' in bytetrack_config:
             model_config.update(bytetrack_config['model'])
-            
+
         return model_config
 
     def _get_kafka_input_config(self) -> Dict[str, Any]:
@@ -118,7 +116,7 @@ class ByteTrackService:
             'bootstrap_servers': kafka_config.get('bootstrap_servers'),
             'topic': kafka_config.get('topic'),
             'group_id': kafka_config.get('group_id'),
-            'auto_offset_reset': consumer_settings.get('auto_offset_reset', 'latest'),
+            'auto_offset_reset': consumer_settings.get('auto_offset_reset', 'earliest'),
             'max_poll_records': consumer_settings.get('max_poll_records', 1),
             'consumer_timeout_ms': consumer_settings.get('consumer_timeout_ms', 1000),
             'enable_auto_commit': consumer_settings.get('enable_auto_commit', True)
@@ -238,12 +236,12 @@ async def main():
     parser = argparse.ArgumentParser(description='ByteTrack Service with Contanos Framework')
     parser.add_argument('--task_id', type=str, required=True,
                         help='Task ID for processing pipeline')
-    parser.add_argument('--config', type=str, 
+    parser.add_argument('--config', type=str,
                         default='apps/dev_pose_estimation_config.yaml',
                         help='Path to configuration file')
-    
+
     args = parser.parse_args()
-    
+
     # Create and start service
     service = ByteTrackService(task_id=args.task_id, config_path=args.config)
     await service.start_service()

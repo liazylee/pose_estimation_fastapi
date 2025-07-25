@@ -80,6 +80,12 @@ class MultiInputInterface:
                         await self._queue.put(self._data_dict[frame_id])
                         del self._data_dict[frame_id]
                         self._frame_id_order.remove(frame_id)
+                        logging.debug(f"Synchronized frame {frame_id} with {self._num_interfaces} interfaces")
+                    else:
+                        # 记录当前帧的同步状态
+                        missing_interfaces = [i for i in range(self._num_interfaces) if i not in self._data_dict[frame_id]]
+                        logging.debug(f"Frame {frame_id} waiting for interfaces: {missing_interfaces}")
+                        
             except Exception as e:
                 logging.error(f"Interface {interface_idx} error: {e}")
                 await asyncio.sleep(1)  # Prevent tight loop on error
@@ -103,7 +109,11 @@ class MultiInputInterface:
 
             return merged
         except asyncio.TimeoutError:
-            logging.warning("Timeout waiting for synchronized data")
+            # 添加更详细的超时信息
+            pending_frames = len(self._frame_id_order)
+            logging.warning(f"Timeout waiting for synchronized data. Pending frames: {pending_frames}")
+            if pending_frames > 0:
+                logging.warning(f"Oldest pending frame: {self._frame_id_order[0] if self._frame_id_order else 'None'}")
             raise
         except asyncio.CancelledError:
             raise

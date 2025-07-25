@@ -94,6 +94,7 @@ async def extract_and_publish_async(video_path: str,
         bootstrap_servers=bootstrap_servers,
         acks='all',
         max_request_size=10 * 1024 * 1024,
+
     )
     await producer.start()
 
@@ -102,15 +103,22 @@ async def extract_and_publish_async(video_path: str,
     try:
         for segment_idx in range(segment_count):
             start_time = segment_idx * segment_time
-            global_frame_idx = int(start_time * fps)
+            # 修复帧ID计算，避免int()截断导致的精度丢失
+            global_frame_idx = round(start_time * fps)  # 使用round()而不是int()
 
             # Extract video segment
+            segment_gop = round(fps * segment_time)  # 25fps×2s=50
+
             ffmpeg_proc = await asyncio.create_subprocess_exec(
                 'ffmpeg',
-                '-ss', str(start_time),
-                '-i', video_path,
+                '-ss', str(start_time), '-i', video_path,
                 '-t', str(segment_time),
-                '-c', 'copy',
+                '-an',
+                '-c:v', 'libx264',
+                '-preset', 'ultrafast',
+                '-g', str(segment_gop),  # GOP 与片段等长
+                '-keyint_min', str(segment_gop),  # 首帧必定关键帧
+                '-pix_fmt', 'yuv420p',
                 '-f', 'mp4',
                 '-movflags', 'frag_keyframe+empty_moov',
                 'pipe:1',
@@ -129,11 +137,13 @@ async def extract_and_publish_async(video_path: str,
                 "width": width,
                 "height": height,
                 "channels": channels,
-                "fps": fps
+                "fps": fps,
+                "segment_idx": segment_idx,  # 添加分段索引用于调试
+                "start_time": start_time  # 添加开始时间用于调试
             }).encode()
 
             await producer.send_and_wait(topic, key=kafka_key, value=stdout)
-            logger.info(f"[{task_id}] ✅ Sent segment {segment_idx} (frame {global_frame_idx})")
+            logger.info(f"[{task_id}] ✅ Sent segment {segment_idx} (frame {global_frame_idx}, time {start_time:.2f}s)")
 
     finally:
         await producer.stop()

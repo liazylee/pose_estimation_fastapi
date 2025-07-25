@@ -1,4 +1,5 @@
 import asyncio
+import asyncio.subprocess
 import json
 import logging
 import time
@@ -37,14 +38,14 @@ class KafkaInput(ABC):
         self.group_id = config.get('group_id', f"kafka_input_{int(time.time())}")
         unique_suffix = str(uuid.uuid4())[:8]  # Add unique suffix
         self.group_id = f"{self.group_id}_{unique_suffix}"
-        self.auto_offset_reset = config.get('auto_offset_reset', 'latest')
+        self.auto_offset_reset = config.get('auto_offset_reset', 'earliest')
         self.max_poll_records = config.get('max_poll_records', 1)
         self.consumer_timeout_ms = config.get('consumer_timeout_ms', 1000)
         self.enable_auto_commit = config.get('enable_auto_commit', True)
 
         # Asyncio constructs
         self.message_queue: Queue = Queue(maxsize=config.get('message_queue_size', 1000))
-        self.consumer = KafkaConsumer()
+        # self.consumer = KafkaConsumer()
         self._executor = ThreadPoolExecutor(max_workers=config.get('max_workers', 1),
                                             thread_name_prefix=f"kafka_{self.group_id}")
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -117,7 +118,6 @@ class KafkaInput(ABC):
                 await self.message_queue.put(message)
                 return
         except(UnicodeDecodeError, json.JSONDecodeError):
-            logger.info(f'failed to decode message as json string , try to  decode as bytes')
             pass
 
         start_frame_id_str = record.key
@@ -127,22 +127,19 @@ class KafkaInput(ABC):
 
         try:
             key_dict = json.loads(record.key)
-            start_frame_id_str = int(key_dict.get('start_frame_id', 0))
+            frame_id_start = int(key_dict.get('frame_id_start', 0))
             width = int(key_dict.get('width', 640))
             height = int(key_dict.get('height', 480))
             channels = int(key_dict.get('channels', 3))
             fps = int(key_dict.get('fps', 30))
-            # Submit decoding task to executor
-            await self._loop.run_in_executor(
-                self._executor,
-                self._decode_and_queue_frames,
-                record.value,
-                start_frame_id_str,
-                width,
-                height,
-                channels,
-                fps
 
+            await self._decode_and_queue_frames(
+                video_segment_bytes=record.value,
+                frame_id_start=frame_id_start,
+                width=width,
+                height=height,
+                channels=channels,
+                fps=fps,
             )
         except (ValueError, TypeError) as e:
             logger.error(f"Error parsing Kafka key: {e}")
@@ -150,60 +147,94 @@ class KafkaInput(ABC):
         except Exception as e:
             logger.error(f"Error submitting decoding task for start_frame_id {start_frame_id_str}: {e}")
 
-    def _decode_and_queue_frames(self,
-                                 video_segment_bytes: bytes,
-                                 frame_id_start: int,
-                                 width: int,
-                                 height: int,
-                                 channels: int = 3,
-                                 fps: float = 30.0):
+    async def _decode_and_queue_frames(
+            self,
+            video_segment_bytes: bytes,
+            frame_id_start: int,
+            width: int,
+            height: int,
+            channels: int = 3,
+            fps: float = 30.0,
+    ):
         """
         Decode video segment and enqueue base64 JPEG frames with metadata.
         """
-        frame_size = width * height * channels
-        pix_fmt = 'bgr24'
-
+        pix_fmt = "bgr24"
         ffmpeg_cmd = [
-            'ffmpeg', '-hide_banner', '-loglevel', 'error',
-            '-i', 'pipe:0',
-            '-f', 'rawvideo',
-            '-pix_fmt', pix_fmt,
-            'pipe:1'
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            "pipe:0",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            pix_fmt,
+            "pipe:1",
         ]
 
-        import subprocess
-        proc = subprocess.Popen(ffmpeg_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-
-        try:
-            stdout_data, _ = proc.communicate(input=video_segment_bytes)
-        except Exception as e:
-            logger.error(f"FFmpeg decode failed at frame {frame_id_start}: {e}")
+        proc = await asyncio.subprocess.create_subprocess_exec(
+            *ffmpeg_cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_data, stderr_data = await proc.communicate(input=video_segment_bytes)
+        if proc.returncode != 0:
+            logger.error(
+                f"FFmpeg decode failed (start={frame_id_start}), code={proc.returncode}, "
+                f"stderr={stderr_data.decode(errors='ignore')}"
+            )
             return
 
-        frame_index = 0
-        for i in range(0, len(stdout_data), frame_size):
-            chunk = stdout_data[i: i + frame_size]
-            if len(chunk) != frame_size:
-                continue
+        frame_size = width * height * channels
+        total_bytes = len(stdout_data)
+        remainder = total_bytes % frame_size
+        if remainder:
+            logger.warning(
+                f"Segment start={frame_id_start} has {remainder} extra bytes; "
+                f"discarding truncated tail frame."
+            )
+            total_bytes -= remainder
+
+        total_frames = total_bytes // frame_size
+        if total_frames == 0:
+            logger.warning(f"Segment start={frame_id_start} produced 0 full frames — skip.")
+            return
+        segment_base_ts = time.time()  # Unix 秒
+        nanos_per_frame = 1e9 / fps
+        res = []
+        for idx in range(total_frames):
+            offset = idx * frame_size
+            chunk = stdout_data[offset: offset + frame_size]
 
             frame_np = np.frombuffer(chunk, dtype=np.uint8).reshape((height, width, channels))
             b64_bytes = encode_frame_to_base64(frame_np, quality=85)
-            frame_id = frame_id_start + frame_index
-            timestamp = time.strftime('%Y-%m-%dT%H:%M:%S.', time.gmtime()) + f"{int(time.time() % 1 * 1e6):06}Z"
+
+            frame_id = frame_id_start + idx
+
+            # 生成 ISO‑8601 微秒级时间戳
+            ts_ns = int(segment_base_ts * 1e9 + idx * nanos_per_frame)
+            ts_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(ts_ns / 1e9))
+            ts_iso += f".{ts_ns % 1_000_000_000:09d}Z"
 
             message = {
                 "task_id": "default_task",
                 "frame_id": frame_id,
-                "timestamp": timestamp,
+                "timestamp": ts_iso,
                 "image_format": "jpeg",
-                "image_bytes": b64_bytes
+                "image_bytes": b64_bytes,
             }
-            # logger.info(f'frame_id = {frame_id}')
-            asyncio.run_coroutine_threadsafe(self.message_queue.put(message), self._loop)
-            # logger.info(f'self.message_queue.qsize() = {self.message_queue.qsize()}')
-            frame_index += 1
-
-        logger.info(f"Decoded {frame_index} frames starting from frame {frame_id_start}")
+            logger.info(f'frame_id = {frame_id}')
+            res.append(frame_id)
+            await self.message_queue.put(message)
+        if len(res) != total_frames:
+            logger.error(f'the frame is not ordered')
+        logger.info(
+            f"Decoded {total_frames} frames (frame_id {frame_id_start} "
+            f"→ {frame_id_start + total_frames - 1})"
+        )
 
     async def read_data(self) -> Optional[Dict[str, Any]]:
         """Read message from queue."""

@@ -126,6 +126,9 @@ class AnnotationService(BaseAIService):
     def _video_config(self) -> Dict[str, Any]:
         """Generate video output configuration."""
         video_config = self.config.get('annotation', {}).get('video_output', {})
+        # 默认fps设置为原视频fps，如果没有则使用25
+        default_fps = video_config.get('fps', 25)
+        
         return {
             'task_id': self.task_id,
             'output_dir': video_config.get('output_dir', 'output_videos'),
@@ -133,7 +136,7 @@ class AnnotationService(BaseAIService):
             'filename_template': video_config.get('filename_template', 'annotated_{task_id}_{timestamp}.mp4'),
             'width': video_config.get('width', 1920),
             'height': video_config.get('height', 1080),
-            'fps': video_config.get('fps', 25),
+            'fps': default_fps,  # 注意：应该从输入视频获取真实fps
             'fourcc': video_config.get('codec', 'mp4v'),
         }
 
