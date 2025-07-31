@@ -116,8 +116,8 @@ async def extract_and_publish_async(video_path: str,
                 '-an',
                 '-c:v', 'libx264',
                 '-preset', 'ultrafast',
-                '-g', str(segment_gop),  # GOP 与片段等长
-                '-keyint_min', str(segment_gop),  # 首帧必定关键帧
+                '-g', str(segment_gop),
+                '-keyint_min', str(segment_gop),
                 '-pix_fmt', 'yuv420p',
                 '-f', 'mp4',
                 '-movflags', 'frag_keyframe+empty_moov',

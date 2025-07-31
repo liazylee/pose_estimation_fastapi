@@ -46,19 +46,22 @@ class AnnotationService(BaseAIService):
         return AnnotationWorker
 
     def create_input_interfaces(self) -> List[KafkaInput]:
-        """Create Kafka input interfaces for frames, detections, and poses."""
+        """Create Kafka input interfaces for frames, detections, poses, and tracking."""
         raw_config = self._kafka_config('raw_frames', 'annotation_raw')
-        det_config = self._kafka_config('yolox_detections', 'annotation_track')
+        det_config = self._kafka_config('yolox_detections', 'annotation_det')
         pose_config = self._kafka_config('rtmpose_results', 'annotation_pose')
+        track_config = self._kafka_config('bytetrack_tracking', 'annotation_track')
 
         logger.info(f"Raw frames topic: {raw_config.get('topic')}")
         logger.info(f"Detections topic: {det_config.get('topic')}")
         logger.info(f"Poses topic: {pose_config.get('topic')}")
+        logger.info(f"Tracking topic: {track_config.get('topic')}")
 
         return [
             KafkaInput(raw_config),
             KafkaInput(det_config),
-            KafkaInput(pose_config)
+            KafkaInput(pose_config),
+            KafkaInput(track_config)
         ]
 
     def create_output_interface(self) -> MultiOutputInterface:

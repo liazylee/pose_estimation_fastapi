@@ -34,8 +34,24 @@ return {
             }
 
 """
+from typing import Tuple
+
 import cv2 as cv  # type: ignore
 import numpy as np
+
+TRACK_COLORS = [
+    (0, 255, 255),  # Yellow
+    (255, 0, 255),  # Magenta
+    (255, 255, 0),  # Cyan
+    (128, 0, 128),  # Purple
+    (255, 165, 0),  # Orange
+    (0, 128, 255),  # Light Blue
+]
+
+
+def get_track_color(track_id: int) -> Tuple[int, int, int]:
+    """Get color for a specific track ID."""
+    return TRACK_COLORS[track_id % len(TRACK_COLORS)]
 
 
 def draw_boxes_on_frame(frame: np.ndarray,
@@ -71,7 +87,8 @@ def draw_boxes_on_frame(frame: np.ndarray,
         # draw the bounding box
         cv.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
         if draw_labels:
+            color = get_track_color(track_id)
             label = f"ID: {track_id}"
-            cv.putText(frame, label, (x1, y1 - 5), cv.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+            cv.putText(frame, label, (x1, y1 - 5), cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
     return frame

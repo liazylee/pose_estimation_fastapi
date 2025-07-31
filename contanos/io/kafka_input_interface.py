@@ -226,7 +226,7 @@ class KafkaInput(ABC):
                 "image_format": "jpeg",
                 "image_bytes": b64_bytes,
             }
-            logger.info(f'frame_id = {frame_id}')
+           
             res.append(frame_id)
             await self.message_queue.put(message)
         if len(res) != total_frames:

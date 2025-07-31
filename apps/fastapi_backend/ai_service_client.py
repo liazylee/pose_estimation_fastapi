@@ -156,15 +156,52 @@ class RTMPoseServiceClient(AIServiceClient):
 
 
 class ByteTrackServiceClient(AIServiceClient):
-    """Client for ByteTrack service (placeholder for future implementation)."""
+    """Client for ByteTrack tracking service."""
 
     def __init__(self, bytetrack_url: str = "http://localhost:8003"):
         super().__init__({"bytetrack": bytetrack_url})
 
-    async def start_service(self, task_id: str) -> Dict[str, Any]:
-        """Start ByteTrack service - placeholder."""
-        # TODO: Implement when ByteTrack microservice is ready
-        raise NotImplementedError("ByteTrack microservice not implemented yet")
+    async def start_service(self, task_id: str, config_path: Optional[str] = None,
+                            devices: Optional[List[str]] = None, log_level: Optional[str] = None) -> Dict[str, Any]:
+        """Start a ByteTrack tracking service."""
+
+        request_data = {"task_id": task_id}
+        if config_path:
+            request_data["config_path"] = config_path
+        if devices:
+            request_data["devices"] = devices
+        if log_level:
+            request_data["log_level"] = log_level
+
+        return await self._make_request("POST", "bytetrack", "services/start", json_data=request_data)
+
+    async def stop_service(self, task_id: str) -> Dict[str, Any]:
+        """Stop a ByteTrack tracking service."""
+        return await self._make_request("POST", "bytetrack", f"services/{task_id}/stop")
+
+    async def get_service_status(self, task_id: str) -> Dict[str, Any]:
+        """Get status of a ByteTrack service."""
+        return await self._make_request("GET", "bytetrack", f"services/{task_id}/status")
+
+    async def list_services(self) -> List[Dict[str, Any]]:
+        """List all ByteTrack services."""
+        return await self._make_request("GET", "bytetrack", "services")
+
+    async def stop_all_services(self) -> Dict[str, Any]:
+        """Stop all ByteTrack services."""
+        return await self._make_request("DELETE", "bytetrack", "services")
+
+    async def get_health(self) -> Dict[str, Any]:
+        """Get ByteTrack service health status."""
+        return await self._make_request("GET", "bytetrack", "health")
+
+    async def ping(self) -> bool:
+        """Ping ByteTrack service to check if it's available."""
+        try:
+            await self._make_request("GET", "bytetrack", "")
+            return True
+        except Exception:
+            return False
 
 
 class AnnotationServiceClient(AIServiceClient):
@@ -295,7 +332,24 @@ class AIServiceOrchestrator:
             results["services"]["rtmpose"] = {"success": False, "error": error_msg}
             # Don't set overall success=False for RTMPose service failure
 
-        # TODO: Start ByteTrack service when ready
+        # Start ByteTrack service
+        try:
+            logger.info(f"Starting ByteTrack service for task {task_id}")
+            bytetrack_result = await self.bytetrack_client.start_service(
+                task_id=task_id,
+                config_path=config.get("bytetrack_config") if config else None,
+                devices=config.get("bytetrack_devices") if config else None,
+                log_level=config.get("log_level") if config else None
+            )
+            results["services"]["bytetrack"] = bytetrack_result
+            logger.info(f"ByteTrack service started successfully for task {task_id}")
+
+        except Exception as e:
+            error_msg = f"Failed to start ByteTrack service: {str(e)}"
+            logger.error(error_msg)
+            results["errors"].append(error_msg)
+            results["services"]["bytetrack"] = {"success": False, "error": error_msg}
+            # Don't set overall success=False for ByteTrack service failure
 
         # Start Annotation service (now implemented)
         try:
@@ -362,7 +416,19 @@ class AIServiceOrchestrator:
             results["services"]["rtmpose"] = {"success": False, "error": error_msg}
             # Don't set overall success=False for RTMPose service failure
 
-        # TODO: Stop ByteTrack service when ready
+        # Stop ByteTrack service
+        try:
+            logger.info(f"Stopping ByteTrack service for task {task_id}")
+            bytetrack_result = await self.bytetrack_client.stop_service(task_id)
+            results["services"]["bytetrack"] = bytetrack_result
+            logger.info(f"ByteTrack service stopped successfully for task {task_id}")
+
+        except Exception as e:
+            error_msg = f"Failed to stop ByteTrack service: {str(e)}"
+            logger.error(error_msg)
+            results["errors"].append(error_msg)
+            results["services"]["bytetrack"] = {"success": False, "error": error_msg}
+            # Don't set overall success=False for ByteTrack service failure
 
         # Stop Annotation service (now implemented)
         try:
@@ -377,8 +443,6 @@ class AIServiceOrchestrator:
             results["errors"].append(error_msg)
             results["services"]["annotation"] = {"success": False, "error": error_msg}
             # Don't set success=False for annotation service failure for now
-
-        # TODO: Stop RTMPose and ByteTrack services when ready
 
         return results
 
@@ -405,7 +469,12 @@ class AIServiceOrchestrator:
         except Exception as e:
             status["services"]["rtmpose"] = {"status": "error", "error": str(e)}
 
-        # TODO: Get ByteTrack status when ready
+        # Get ByteTrack status
+        try:
+            bytetrack_status = await self.bytetrack_client.get_service_status(task_id)
+            status["services"]["bytetrack"] = bytetrack_status
+        except Exception as e:
+            status["services"]["bytetrack"] = {"status": "error", "error": str(e)}
 
         # Get Annotation status (now implemented)
         try:
@@ -463,8 +532,19 @@ class AIServiceOrchestrator:
             }
             health["overall_healthy"] = False
 
-        # TODO: Check ByteTrack health when ready
-        health["services"]["bytetrack"] = {"healthy": False, "status": "not_implemented"}
+        # Check ByteTrack health
+        try:
+            bytetrack_health = await self.bytetrack_client.get_health()
+            health["services"]["bytetrack"] = {
+                "healthy": bytetrack_health.get("healthy", False),
+                "details": bytetrack_health
+            }
+        except Exception as e:
+            health["services"]["bytetrack"] = {
+                "healthy": False,
+                "error": str(e)
+            }
+            health["overall_healthy"] = False
 
         # Check Annotation health (now implemented)
         try:
@@ -480,9 +560,6 @@ class AIServiceOrchestrator:
             }
             health["overall_healthy"] = False
 
-        # TODO: Check health of RTMPose and ByteTrack services when they're ready
-        health["services"]["rtmpose"] = {"healthy": False, "status": "not_implemented"}
-        health["services"]["bytetrack"] = {"healthy": False, "status": "not_implemented"}
 
         return health
 
@@ -491,6 +568,7 @@ class AIServiceOrchestrator:
         try:
             await self.yolox_client.stop_all_services()
             await self.rtmpose_client.stop_all_services()
+            await self.bytetrack_client.stop_all_services()
             await self.annotation_client.stop_all_services()
 
         except Exception as e:

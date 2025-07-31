@@ -1,13 +1,8 @@
-# ByteTrack Multi-Object Tracking Service
-# Subscribes to RTMPose results and assigns persistent track IDs
+from contanos.ai_service import create_ai_service_app, run_ai_service_app
+from service_manager import ByteTrack_CONFIG, get_service_manager
 
-# TODO: Implement ByteTrack service main loop:
-# - Subscribe to rtmpose_{task_id} topics
-# - Initialize ByteTrack tracker per task
-# - Assign persistent track IDs to detected persons
-# - Publish tracked poses to bytetrack_{task_id} topics
-# - Handle track lifecycle management (new, lost, recovered)
+#
+app = create_ai_service_app(ByteTrack_CONFIG, get_service_manager)
 
-# TODO: Add tracking configuration and tuning parameters
-# TODO: Implement track ID consistency across frames
-# TODO: Add support for track visualization and debugging 
+if __name__ == "__main__":
+    run_ai_service_app(app, ByteTrack_CONFIG)

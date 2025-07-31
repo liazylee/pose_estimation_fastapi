@@ -3,14 +3,22 @@ annotation worker.py
 """
 import logging
 import os
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 
 import cv2
 import numpy as np
 
 from contanos import BaseWorker, deserialize_image_from_kafka
-from contanos.visualizer.box_drawer import draw_boxes_on_frame
-from contanos.visualizer.skeleton_drawer import draw_pose
+from contanos.visualizer.trajectory_drawer import TrajectoryDrawer
+
+# Import FrameAnnotator with error handling for different execution contexts
+try:
+    from .frame_annotator import FrameAnnotator
+except ImportError:
+    try:
+        from frame_annotator import FrameAnnotator
+    except ImportError:
+        from apps.annotation_service.frame_annotator import FrameAnnotator
 
 
 class AnnotationWorker(BaseWorker):
@@ -31,9 +39,12 @@ class AnnotationWorker(BaseWorker):
     def _model_init(self):
         """Initialize the annotation model."""
         try:
-            # Initialize drawing functions
-            self.box_drawer = draw_boxes_on_frame
-            self.skeleton_drawer = draw_pose
+            # Initialize FrameAnnotator
+            self.frame_annotator = FrameAnnotator(
+            )
+            self.trajectory_drawer = TrajectoryDrawer(
+                max_trajectory_length=20
+            )
 
             logging.info(f"AnnotationWorker {self.worker_id} model initialized successfully")
 
@@ -43,10 +54,10 @@ class AnnotationWorker(BaseWorker):
 
     def _predict(self, inputs: Dict) -> Optional[Dict]:
         """
-        Annotate the input frame with bounding boxes and pose data and send to output.
+        Annotate the input frame with all available data.
 
         Args:
-            inputs (Dict): Input data containing 'image_bytes', 'detections', and 'pose_estimations'.
+            inputs (Dict): Input data containing 'image_bytes', 'detections', 'poses', and 'tracked_poses'.
 
         Returns:
             Dict: Result data for output interfaces.
@@ -54,9 +65,9 @@ class AnnotationWorker(BaseWorker):
         try:
             frame_bytes = inputs.get('image_bytes')
             detections = inputs.get('detections', [])
-            # Fix field name mismatch: RTMPose outputs 'pose_estimations' (plural)
-            pose_estimations = inputs.get('pose_estimations', [])
-
+            poses = inputs.get('pose_estimations', [])  # Support both field names
+            tracked_poses = inputs.get('tracked_poses', [])
+            frame_id = inputs.get('frame_id', 0)
             if frame_bytes is None:
                 logging.error(f"Worker {self.worker_id}: Invalid frame input")
                 return None
@@ -66,18 +77,27 @@ class AnnotationWorker(BaseWorker):
             if frame is None or not isinstance(frame, np.ndarray):
                 logging.error(f"Worker {self.worker_id}: Failed to deserialize frame")
                 return None
+            points = {
+                obj['track_id']: (
+                    (obj['bbox'][0] + obj['bbox'][2]) / 2,
+                    (obj['bbox'][1] + obj['bbox'][3]) / 2
+                )
+                for obj in tracked_poses
+            }
+            self.trajectory_drawer.update_trajectories(points, frame_id)
+            # Use FrameAnnotator to draw all annotations
+            annotated_frame = self.frame_annotator.annotate_frame(
+                frame=frame,
+                tracked_objects=tracked_poses,
+                poses=poses,
 
-            # Draw annotations
-            annotated_frame = self._draw_annotations(frame, detections, pose_estimations)
-
+            )
+            # use TrajectoryDrawer
+            annotated_frame = self.trajectory_drawer.draw_trajectories(annotated_frame)
             # Save debug frames periodically
             if self.frame_count % 100 == 0:
                 self._save_debug_frame(annotated_frame)
-                pass
             self.frame_count += 1
-
-            # Convert BGR to RGB for output (standardized format)
-            # rgb_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
 
             # Return data formatted for output interfaces
             return {
@@ -86,42 +106,11 @@ class AnnotationWorker(BaseWorker):
                 },
                 'frame_id': inputs.get('frame_id', None),
                 'task_id': inputs.get('task_id', self.model_config.get('task_id'))
-                
             }
 
         except Exception as e:
             logging.error(f"AnnotationWorker {self.worker_id} prediction error: {e}")
             return None
-
-    def _draw_annotations(self, frame: np.ndarray, detections: List, pose_estimations: List = None) -> np.ndarray:
-        """Draw annotations on the frame."""
-        try:
-            # Create a copy to avoid modifying the original frame
-            annotated_frame = frame.copy()
-
-            # Draw boxes using the existing box_drawer function
-            if detections:
-                logging.debug(f"Drawing {len(detections)} detection boxes")
-                annotated_frame = self.box_drawer(
-                    annotated_frame,
-                    detections,
-                    scale=1.0,
-                    draw_labels=True
-                )
-
-            # Draw pose estimation if available
-            if pose_estimations:
-                logging.debug(f"Drawing pose estimation for {len(pose_estimations)} persons")
-                annotated_frame = self.skeleton_drawer(
-                    annotated_frame,
-                    pose_estimations,
-                )
-
-            return annotated_frame
-
-        except Exception as e:
-            logging.error(f"Error drawing annotations: {e}")
-            return frame
 
     def _save_debug_frame(self, frame: np.ndarray) -> None:
         """Save debug frame to local storage."""

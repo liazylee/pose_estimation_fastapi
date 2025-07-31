@@ -157,7 +157,7 @@ async def test_kafka_interfaces():
             'bootstrap_servers': kafka_config['bootstrap_servers'],
             'topic': kafka_config['input_topic'],
             'group_id': kafka_config['group_id'],
-            'auto_offset_reset': 'latest'
+            'auto_offset_reset': 'earliest'
         }
 
         # Create output interface

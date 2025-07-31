@@ -20,6 +20,11 @@ SERVICES = {
         "port": 8002,
         "description": "RTMPose service"
     },
+    "bytetrack": {
+        "path": "apps/bytetrack_service",
+        "port": 8003,
+        "description": "ByteTrack tracking service"
+    },
     "annotation": {
         "path": "apps/annotation_service",
         "port": 8004,

@@ -95,7 +95,7 @@ class KafkaTestConsumer:
             topic,
             bootstrap_servers=bootstrap_servers,
             group_id=group_id,
-            auto_offset_reset='latest',
+            auto_offset_reset='earliest',
             value_deserializer=lambda m: json.loads(m.decode('utf-8')),
             consumer_timeout_ms=10000  # 10 second timeout
         )
@@ -320,4 +320,3 @@ if __name__ == "__main__":
 
     # Run the test
     asyncio.run(main())
-

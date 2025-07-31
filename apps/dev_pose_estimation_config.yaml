@@ -107,7 +107,7 @@ bytetrack:
   track_thresh: 0.45
   match_thresh: 0.8
   track_buffer: 25
-  frame_rate: 30
+  frame_rate: 25
   per_class: false
   # Device configuration
   devices: "cpu"
@@ -141,10 +141,13 @@ annotation:
       config: "kafka://localhost:9092,topic=raw_frames_{task_id},group_id=annotation_raw_{task_id}"
     yolox_detections:
       type: "kafka"
-      config: "kafka://localhost:9092,topic=yolox_detections_{task_id},group_id=annotation_track_{task_id}"
+      config: "kafka://localhost:9092,topic=yolox_detections_{task_id},group_id=annotation_det_{task_id}"
     poses:
       type: "kafka"
       config: "kafka://localhost:9092,topic=rtmpose_results_{task_id},group_id=annotation_pose_{task_id}"
+    bytetrack_tracking:
+      type: "kafka"
+      config: "kafka://localhost:9092,topic=bytetrack_tracking_{task_id},group_id=annotation_track_{task_id}"
   # Output configuration - still RTSP for final visualization
   output:
     type: "rtsp"
