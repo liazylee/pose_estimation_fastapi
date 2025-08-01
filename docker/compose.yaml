@@ -2,21 +2,6 @@
 # Only includes Kafka, Zookeeper, and RTSP server
 # AI services will be started separately for easier debugging
 
-# TODO: Define the following services:
-# - kafka: Kafka broker with Zookeeper
-# - fastapi-backend: Main API service
-# - yolox-service: Human detection service  
-# - rtmpose-service: Pose estimation service
-# - bytetrack-service: Multi-object tracking service
-# - annotation-service: Video annotation and output service
-
-# TODO: Configure service dependencies and networking:
-# - Proper service startup order
-# - Internal network for service communication
-# - External ports for API and RTSP access
-# - Volume mounts for models, uploads, and outputs
-# - Environment variable configuration
-# - Health checks and restart policies 
 version: '3.8'
 
 services:
@@ -63,7 +48,7 @@ services:
   kafka-ui:
     image: provectuslabs/kafka-ui
     ports:
-      - "8088:8088"
+      - "8080:8080"
     environment:
       - KAFKA_CLUSTERS_0_NAME=local
       - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:29092
