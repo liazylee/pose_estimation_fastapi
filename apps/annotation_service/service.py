@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 from contanos.ai_service import BaseAIService
 from contanos.io.kafka_input_interface import KafkaInput
+from contanos.io.mongodb_output_interface import MongoDBOutput
 from contanos.io.multi_output_interface import MultiOutputInterface
 from contanos.io.rtsp_output_interface import RTSPOutput
 from contanos.io.video_output_interface import VideoOutput
@@ -59,14 +60,35 @@ class AnnotationService(BaseAIService):
 
         return [
             KafkaInput(raw_config),
-            KafkaInput(det_config),
+            # KafkaInput(det_config),
             KafkaInput(pose_config),
             KafkaInput(track_config)
         ]
 
     def create_output_interface(self) -> MultiOutputInterface:
-        """Create multi-output interface for RTSP and video outputs."""
-        outputs = [RTSPOutput(self._rtsp_config())]
+        """Create multi-output interface for RTSP, video, and MongoDB outputs."""
+        outputs = []
+
+        # Handle multiple outputs configuration
+        outputs_config = self.config.get('annotation', {}).get('outputs', [])
+        if not outputs_config:
+            # Fallback to single output configuration for backward compatibility
+            single_output = self.config.get('annotation', {}).get('output', {})
+            if single_output:
+                outputs_config = [single_output]
+            else:
+                # Default RTSP output
+                outputs_config = [{'type': 'rtsp'}]
+
+        for output_config in outputs_config:
+            output_type = output_config.get('type')
+
+            if output_type == 'rtsp':
+                outputs.append(RTSPOutput(self._rtsp_config_from_dict(output_config)))
+                logger.info("RTSP output enabled")
+            elif output_type == 'mongodb':
+                outputs.append(MongoDBOutput(self._mongodb_config_from_dict(output_config)))
+                logger.info("MongoDB output enabled")
 
         # Add video output if enabled
         video_config = self._video_config()
@@ -126,12 +148,59 @@ class AnnotationService(BaseAIService):
                     config[key] = value
         return config
 
+    def _rtsp_config_from_dict(self, output_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate RTSP output configuration from output config dict."""
+        config = {
+            'addr': 'rtsp://localhost:8554',
+            'topic': f"outstream_{self.task_id}",
+            'width': 1920,
+            'height': 1080,
+            'fps': 25,
+            'bitrate': '4000k',
+            'preset': 'fast',
+            'codec': 'h264_nvenc',
+            'pixel_format': 'yuv420p',
+        }
+
+        # Parse config string if present
+        config_str = output_config.get('config', '')
+        if config_str:
+            parts = config_str.split(',')
+            if parts:
+                config['addr'] = parts[0]
+            for part in parts[1:]:
+                if '=' in part:
+                    key, value = part.split('=', 1)
+                    if key == 'topic':
+                        config[key] = value.format(task_id=self.task_id)
+                    elif key in ('width', 'height', 'fps'):
+                        config[key] = int(value)
+
+        # Override with any direct config values
+        for key, value in output_config.items():
+            if key not in ['type', 'config']:
+                config[key] = value
+
+        return config
+
+    def _mongodb_config_from_dict(self, output_config: Dict[str, Any]) -> Dict[str, Any]:
+        """Generate MongoDB output configuration from output config dict."""
+        config = {
+            'mongo_uri': output_config.get('mongo_uri', 'mongodb://localhost:27017/'),
+            'database': output_config.get('database', 'pose_annotations'),
+            'collection': output_config.get('collection', 'tracked_results'),
+            'batch_size': output_config.get('batch_size', 10),
+            'batch_timeout': output_config.get('batch_timeout', 5.0),
+            'queue_max_len': output_config.get('queue_max_len', 100),
+        }
+        return config
+
     def _video_config(self) -> Dict[str, Any]:
         """Generate video output configuration."""
         video_config = self.config.get('annotation', {}).get('video_output', {})
         # 默认fps设置为原视频fps，如果没有则使用25
         default_fps = video_config.get('fps', 25)
-        
+
         return {
             'task_id': self.task_id,
             'output_dir': video_config.get('output_dir', 'output_videos'),

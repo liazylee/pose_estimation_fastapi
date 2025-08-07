@@ -17,6 +17,7 @@ from routes.core import router as core_router
 from routes.streams import router as streams_router
 from routes.tasks import router as tasks_router
 from routes.video import router as video_router
+from routes.websocket_pose import router as websocket_pose_router
 
 
 @asynccontextmanager
@@ -54,6 +55,7 @@ app.include_router(video_router, tags=["video"])
 app.include_router(tasks_router, tags=["tasks"])
 app.include_router(streams_router, tags=["streams"])
 app.include_router(ai_services_router, tags=["ai_services"])
+app.include_router(websocket_pose_router, tags=["websocket_pose"])
 
 if __name__ == "__main__":
     import argparse

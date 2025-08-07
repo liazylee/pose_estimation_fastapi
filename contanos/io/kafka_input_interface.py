@@ -214,7 +214,7 @@ class KafkaInput(ABC):
 
             frame_id = frame_id_start + idx
 
-            # 生成 ISO‑8601 微秒级时间戳
+            # Calculate timestamp in ISO 8601 format
             ts_ns = int(segment_base_ts * 1e9 + idx * nanos_per_frame)
             ts_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(ts_ns / 1e9))
             ts_iso += f".{ts_ns % 1_000_000_000:09d}Z"
@@ -226,7 +226,7 @@ class KafkaInput(ABC):
                 "image_format": "jpeg",
                 "image_bytes": b64_bytes,
             }
-           
+
             res.append(frame_id)
             await self.message_queue.put(message)
         if len(res) != total_frames:

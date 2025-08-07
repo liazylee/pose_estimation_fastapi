@@ -6,6 +6,7 @@ from .multi_input_interface import MultiInputInterface
 from .multi_output_interface import MultiOutputInterface
 from .rtsp_input_interface import RTSPInput
 # Output interfaces
+from .mongodb_output_interface import MongoDBOutput
 from .rtsp_output_interface import RTSPOutput
 from .video_output_interface import VideoOutput
 
@@ -17,6 +18,7 @@ __all__ = [
     # Output interfaces
     'RTSPOutput',
     'KafkaOutput',
+    'MongoDBOutput',
     'VideoOutput',
     'MultiOutputInterface',
     # Topic management

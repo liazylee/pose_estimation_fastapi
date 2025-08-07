@@ -28,8 +28,8 @@ class AnnotationWorker(BaseWorker):
                  model_config: Dict,
                  input_interface,
                  output_interface):
-        super().__init__(worker_id, device, model_config,
-                         input_interface, output_interface)
+        BaseWorker.__init__(self, worker_id, device, model_config,
+                            input_interface, output_interface)
 
         # Processing state
         self.frame_count = 0
@@ -43,7 +43,8 @@ class AnnotationWorker(BaseWorker):
             self.frame_annotator = FrameAnnotator(
             )
             self.trajectory_drawer = TrajectoryDrawer(
-                max_trajectory_length=20
+                max_trajectory_length=20,
+                gap_threshold=75.0,
             )
 
             logging.info(f"AnnotationWorker {self.worker_id} model initialized successfully")
@@ -64,9 +65,10 @@ class AnnotationWorker(BaseWorker):
         """
         try:
             frame_bytes = inputs.get('image_bytes')
-            detections = inputs.get('detections', [])
+            # detections = inputs.get('detections', [])
             poses = inputs.get('pose_estimations', [])  # Support both field names
             tracked_poses = inputs.get('tracked_poses', [])
+            tracked_poses_results = inputs.get('tracked_poses_results', [])
             frame_id = inputs.get('frame_id', 0)
             if frame_bytes is None:
                 logging.error(f"Worker {self.worker_id}: Invalid frame input")
@@ -79,13 +81,15 @@ class AnnotationWorker(BaseWorker):
                 return None
             points = {
                 obj['track_id']: (
-                    (obj['bbox'][0] + obj['bbox'][2]) / 2,
-                    (obj['bbox'][1] + obj['bbox'][3]) / 2
+                    obj['bbox'][2],
+                    obj['bbox'][3]
                 )
                 for obj in tracked_poses
             }
             self.trajectory_drawer.update_trajectories(points, frame_id)
             # Use FrameAnnotator to draw all annotations
+            self.trajectory_drawer.purge_stale_trajectories(frame_id)
+
             annotated_frame = self.frame_annotator.annotate_frame(
                 frame=frame,
                 tracked_objects=tracked_poses,
@@ -99,14 +103,18 @@ class AnnotationWorker(BaseWorker):
                 self._save_debug_frame(annotated_frame)
             self.frame_count += 1
 
-            # Return data formatted for output interfaces
-            return {
+            # Prepare return data
+            result_data = {
                 'results': {
                     'annotated_frame': annotated_frame
                 },
                 'frame_id': inputs.get('frame_id', None),
-                'task_id': inputs.get('task_id', self.model_config.get('task_id'))
+                'task_id': self.model_config.get('task_id', None),
+                'timestamp': inputs.get('timestamp', None),
+                'tracked_poses_results': tracked_poses_results,
             }
+
+            return result_data
 
         except Exception as e:
             logging.error(f"AnnotationWorker {self.worker_id} prediction error: {e}")
@@ -132,6 +140,8 @@ class AnnotationWorker(BaseWorker):
     def cleanup(self):
         """Clean up resources when worker is shut down."""
         try:
+            # Clean up MongoDB connection
+            self.cleanup_mongo()
             logging.info(f"AnnotationWorker {self.worker_id} cleanup completed after {self.frame_count} frames")
         except Exception as e:
             logging.error(f"Error during cleanup: {e}")

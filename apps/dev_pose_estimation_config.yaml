@@ -148,17 +148,23 @@ annotation:
     bytetrack_tracking:
       type: "kafka"
       config: "kafka://localhost:9092,topic=bytetrack_tracking_{task_id},group_id=annotation_track_{task_id}"
-  # Output configuration - still RTSP for final visualization
-  output:
-    type: "rtsp"
-    config: "rtsp://localhost:8554,topic=outstream_{task_id},width=1920,height=1080,fps=25"
-    fps: 25  # 注意：应该与输入视频fps匹配以避免时长变化
-    bitrate: "4000k"
-    width: 1920
-    height: 1080
-    preset: "fast"
-    codec: "libx264"
-    pixel_format: "yuv420p"
+  # Output configuration - multiple outputs supported
+  outputs:
+    - type: "rtsp"
+      config: "rtsp://localhost:8554,topic=outstream_{task_id},width=1920,height=1080,fps=25"
+      fps: 25  # 注意：应该与输入视频fps匹配以避免时长变化
+      bitrate: "4000k"
+      width: 1920
+      height: 1080
+      preset: "fast"
+      codec: "libx264"
+      pixel_format: "yuv420p"
+    - type: "mongodb"
+      mongo_uri: "mongodb://admin:password@localhost:27017/pose_annotations?authSource=admin"
+      database: "pose_annotations"
+      collection: "tracked_results"
+      batch_size: 10
+      batch_timeout: 5.0
   # Video file output configuration (using FFmpeg)
   video_output:
     enabled: true

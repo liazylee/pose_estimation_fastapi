@@ -53,21 +53,31 @@ class RTMPoseWorker(BaseWorker):
 
             # Run model inference
             deserializer_frame = deserialize_image_from_kafka(frame)
-            detections = inputs.get('detections', {})
-            if not isinstance(detections, List):
-                logger.error(f"Worker {self.worker_id} received invalid detections format: {type(detections)}")
+            tracked_poses = inputs.get('tracked_poses', [])
+            if not isinstance(tracked_poses, List):
+                logger.error(f"Worker {self.worker_id} received invalid detections format: {type(tracked_poses)}")
                 return None
-            detections = [i.get('bbox', []) for i in detections]
+            detections = [i.get('bbox', []) for i in tracked_poses]
             pose_output, _ = self.pose_model(deserializer_frame, detections)
             if pose_output is None or len(pose_output) == 0:
                 logger.warning(f"Worker {self.worker_id} received empty pose output")
                 return None
             pose_output = np.array(pose_output).tolist()
+            # match pose output with detection IDs
+            if len(pose_output) != len(tracked_poses):
+                logger.warning(f"Worker {self.worker_id} pose output length mismatch: "
+                               f"{len(pose_output)} vs {len(tracked_poses)}")
+                min_length = min(len(pose_output), len(tracked_poses))
+                pose_output = pose_output[:min_length]
+                tracked_poses = tracked_poses[:min_length]
+            for i, pose in enumerate(pose_output):
+                tracked_poses[i]['pose'] = pose
             return {
                 'pose_estimations': pose_output,
                 'frame_id': inputs.get('frame_id', None),
                 'task_id': inputs.get('task_id', None),
                 'pose_estimation_length': len(pose_output),
+                'tracked_poses_results': tracked_poses
             }
 
         except Exception as e:

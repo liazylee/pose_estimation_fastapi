@@ -69,6 +69,7 @@ class YOLOXWorker(BaseWorker):
                 'detections': detections,
                 'detection_count': len(detections),
                 'frame_id': inputs.get('frame_id', None),
+                'timestamp': inputs.get('timestamp', None),
 
             }
             return result

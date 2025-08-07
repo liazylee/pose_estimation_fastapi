@@ -49,6 +49,7 @@ protobuf==6.31.1
 pydantic==2.11.7
 pydantic_core==2.33.2
 Pygments==2.19.2
+motor==3.6.0
 pytest==8.4.1
 python-multipart==0.0.20
 python-snappy==0.7.3

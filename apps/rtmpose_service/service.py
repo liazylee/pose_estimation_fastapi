@@ -44,11 +44,11 @@ class RTMPoseService(BaseAIService):
     def create_input_interfaces(self) -> List[KafkaInput]:
         """Create Kafka input interfaces for frames and detections."""
         frames_config = self._get_kafka_input_config('raw_frames', 'rtmpose_raw')
-        detections_config = self._get_kafka_input_config('yolox_detections', 'rtmpose_det')
-        
+        detections_config = self._get_kafka_input_config('bytetrack_tracking', 'rtmpose_det')
+
         logger.info(f"Frames input topic: {frames_config.get('topic')}")
         logger.info(f"Detections input topic: {detections_config.get('topic')}")
-        
+
         return [
             KafkaInput(config=frames_config),
             KafkaInput(config=detections_config)
@@ -58,7 +58,7 @@ class RTMPoseService(BaseAIService):
         """Create Kafka output interface for pose results."""
         output_config = self._get_kafka_output_config()
         logger.info(f"Output topic: {output_config.get('topic')}")
-        
+
         return KafkaOutput(config=output_config)
 
     def get_model_config(self) -> Dict[str, Any]:
@@ -140,4 +140,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    asyncio.run(main())

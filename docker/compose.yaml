@@ -72,109 +72,26 @@ services:
     # volumes:
     #   - ./rtsp-config.yml:/mediamtx.yml:ro
 
-# AI Services - Start these manually with scripts for debugging
-# Uncomment and use docker-compose when ready for production
+  # MongoDB for tracking results persistence
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+      MONGO_INITDB_DATABASE: pose_tracking
+    #    volumes:
+    #      - mongodb-data:/data/db
+    restart: unless-stopped
 
-#   # FastAPI Backend
-#   backend:
-#     build:
-#       context: ..
-#       dockerfile: docker/backend.Dockerfile
-#     container_name: video_pipeline_backend
-#     ports:
-#       - "8000:8000"
-#     environment:
-#       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-#       - PYTHONUNBUFFERED=1
-#     volumes:
-#       - video-uploads:/tmp/video_uploads
-#       - video-outputs:/tmp/video_outputs
-#     depends_on:
-#       - kafka
-#     command: uvicorn apps.fastapi_backend.main:app --host 0.0.0.0 --port 8000 --reload
-# 
-#   # YOLOX Service
-#   yolox:
-#     build:
-#       context: ..
-#       dockerfile: docker/yolox.Dockerfile
-#     container_name: yolox_service
-#     environment:
-#       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-#       - CUDA_VISIBLE_DEVICES=0
-#       - PYTHONUNBUFFERED=1
-#     volumes:
-#       - model-weights:/models
-#     depends_on:
-#       - kafka
-#     deploy:
-#       resources:
-#         reservations:
-#           devices:
-#             - driver: nvidia
-#               count: 1
-#               capabilities: [gpu]
-#     command: python -m apps.yolox_service.service
-# 
-#   # RTMPose Service
-#   rtmpose:
-#     build:
-#       context: ..
-#       dockerfile: docker/rtmpose.Dockerfile
-#     container_name: rtmpose_service
-#     environment:
-#       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-#       - CUDA_VISIBLE_DEVICES=0
-#       - PYTHONUNBUFFERED=1
-#     volumes:
-#       - model-weights:/models
-#     depends_on:
-#       - kafka
-#     deploy:
-#       resources:
-#         reservations:
-#           devices:
-#             - driver: nvidia
-#               count: 1
-#               capabilities: [gpu]
-#     command: python -m apps.rtmpose_service.service
-# 
-#   # ByteTrack Service
-#   bytetrack:
-#     build:
-#       context: ..
-#       dockerfile: docker/bytetrack.Dockerfile
-#     container_name: bytetrack_service
-#     environment:
-#       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-#       - PYTHONUNBUFFERED=1
-#     depends_on:
-#       - kafka
-#     command: python -m apps.bytetrack_service.service
-# 
-#   # Annotation Service
-#   annotation:
-#     build:
-#       context: ..
-#       dockerfile: docker/annotation.Dockerfile
-#     container_name: annotation_service
-#     environment:
-#       - KAFKA_BOOTSTRAP_SERVERS=kafka:29092
-#       - PYTHONUNBUFFERED=1
-#     volumes:
-#       - video-outputs:/tmp/video_outputs
-#     depends_on:
-#       - kafka
-#     command: python -m apps.annotation_service.service
 
 volumes:
   zookeeper-data:
   zookeeper-logs:
   kafka-data:
-  # video-uploads:
-  # video-outputs:
-  # model-weights:
-
+  mongodb-data:
 networks:
   default:
     name: video_pipeline_network

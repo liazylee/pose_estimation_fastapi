@@ -21,5 +21,6 @@ __all__ = [
     'encode_frame_to_base64', 'decode_base64_to_frame',
     'resize_frame_if_needed', 'encode_image_message', 'decode_image_message',
     'encode_detection_message', 'encode_pose_message', 'encode_tracking_message',
-    'serialize_image_for_kafka', 'deserialize_image_from_kafka'
+    'serialize_image_for_kafka', 'deserialize_image_from_kafka',
+
 ]
