@@ -13,7 +13,7 @@ from dependencies import get_ai_orchestrator
 router = APIRouter()
 
 
-@router.get("/", response_class=HTMLResponse)
+@router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     """Serve the main dashboard page."""
     html_file = TEMPLATES_DIR / "dashboard.html"

@@ -8,8 +8,9 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import RedirectResponse
 
-from config import APP_TITLE, APP_VERSION, STATIC_DIR, CORS_SETTINGS, logger
+from config import APP_TITLE, APP_VERSION, STATIC_DIR, CORS_SETTINGS, logger, FRONTEND_DIST_DIR
 from dependencies import initialize_services, cleanup_services
 from routes.ai_services import router as ai_services_router
 # Import all route modules
@@ -49,6 +50,10 @@ app.add_middleware(CORSMiddleware, **CORS_SETTINGS)
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+# Mount SPA (if built)
+if FRONTEND_DIST_DIR.exists():
+    app.mount("/app", StaticFiles(directory=str(FRONTEND_DIST_DIR), html=True), name="app")
+
 # Include all routers
 app.include_router(core_router, tags=["core"])
 app.include_router(video_router, tags=["video"])
@@ -56,6 +61,14 @@ app.include_router(tasks_router, tags=["tasks"])
 app.include_router(streams_router, tags=["streams"])
 app.include_router(ai_services_router, tags=["ai_services"])
 app.include_router(websocket_pose_router, tags=["websocket_pose"])
+
+# Redirect root to SPA if present
+@app.get("/")
+async def root_redirect():
+    if FRONTEND_DIST_DIR.exists():
+        return RedirectResponse(url="/app/")
+    # Fallback to server-side dashboard route
+    return RedirectResponse(url="/dashboard")
 
 if __name__ == "__main__":
     import argparse
