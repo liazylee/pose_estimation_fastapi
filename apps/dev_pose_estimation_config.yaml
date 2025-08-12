@@ -100,21 +100,32 @@ rtmpose:
     type: "kafka"
     config: "kafka://localhost:9092,topic=rtmpose_results_{task_id},acks=all,compression_type=gzip"
 
-# ByteTrack object tracking service configuration
+# BoTSORT object tracking service configuration
 bytetrack:
   enabled: true
-  # Tracking parameters
-  track_thresh: 0.45
+  # BoTSORT specific parameters
+  reid_weights: "osnet_x0_25_msmt17.pt"  # ReID model weights path
+  half: true  # Use half precision
+  track_high_thresh: 0.3  # Lowered from 0.6 for better detection
+  track_low_thresh: 0.1
+  new_track_thresh: 0.4  # Lowered from 0.7 for easier track creation
+  track_buffer: 30
   match_thresh: 0.8
-  track_buffer: 25
+  cmc_method: "ecc"  # Camera motion compensation method
+  # Legacy ByteTrack parameters (for backward compatibility)
+  track_thresh: 0.45
   frame_rate: 25
   per_class: false
   # Device configuration
-  devices: "cpu"
-  # Input configuration - using Kafka
+  devices: "cuda:0"  # Changed to GPU for BoTSORT performance
+  # Input configuration - multi-input for raw frames and detections
   input:
-    type: "kafka"
-    config: "kafka://localhost:9092,topic=yolox_detections_{task_id},group_id=bytetrack_consumers_{task_id}"
+    raw_frames:
+      type: "kafka"
+      config: "kafka://localhost:9092,topic=raw_frames_{task_id},group_id=bytetrack_raw_{task_id}"
+    detections:
+      type: "kafka"
+      config: "kafka://localhost:9092,topic=yolox_detections_{task_id},group_id=bytetrack_consumers_{task_id}"
   # Output configuration - using Kafka
   output:
     type: "kafka"
@@ -151,12 +162,12 @@ annotation:
   # Output configuration - multiple outputs supported
   outputs:
     - type: "rtsp"
-      config: "rtsp://localhost:8554,topic=outstream_{task_id},width=1920,height=1080,fps=25"
+      config: "rtsp://localhost:8554,topic=outstream_{task_id},width=1280,height=720,fps=25"
       fps: 25  # 注意：应该与输入视频fps匹配以避免时长变化
       bitrate: "4000k"
-      width: 1920
-      height: 1080
-      preset: "fast"
+      width: 1280
+      height: 720
+      preset: "veryfast"
       codec: "libx264"
       pixel_format: "yuv420p"
     - type: "mongodb"

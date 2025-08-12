@@ -44,4 +44,4 @@ CORS_SETTINGS = {
 }
 
 # Task cleanup settings
-KAFKA_TOPIC_CLEANUP_DELAY = 60 * 60  # 1 hour 
+KAFKA_TOPIC_CLEANUP_DELAY = 60 * 60  # 1 hour

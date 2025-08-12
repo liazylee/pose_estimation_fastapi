@@ -102,7 +102,7 @@ class MongoDBOutput(ABC):
         try:
             # Use native async operation with motor
             result = await self.coll.insert_many(batch)
-            logging.info(f"Inserted {len(result.inserted_ids)} documents to MongoDB")
+            # logging.info(f"Inserted {len(result.inserted_ids)} documents to MongoDB")
         except PyMongoError as e:
             logging.error(f"MongoDB write error: {e}")
             # Don't raise - we want to continue processing other batches

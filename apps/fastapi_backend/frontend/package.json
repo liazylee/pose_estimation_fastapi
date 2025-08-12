@@ -12,10 +12,11 @@
     "@mantine/core": "^7.12.1",
     "@mantine/hooks": "^7.12.1",
     "@mantine/notifications": "^7.12.1",
+    "@vitejs/plugin-react": "^5.0.0",
     "axios": "^1.7.7",
     "axios-retry": "^4.5.0",
-    "lucide-react": "^0.453.0",
     "hls.js": "^1.5.13",
+    "lucide-react": "^0.453.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-router-dom": "^6.26.2",
@@ -29,5 +30,3 @@
     "vite": "^5.3.3"
   }
 }
-
-

@@ -59,20 +59,24 @@ services:
     image: bluenviron/mediamtx:latest
     container_name: rtsp_server
     ports:
-      - "8554:8554"  # RTSP
-      - "1935:1935"  # RTMP
-      - "8888:8888"  # HLS
-      - "8889:8889"  # WebRTC
+      - "8554:8554"
+      - "8888:8888"   # WebRTC
+      - "8889:8889"   # HLS
+      - "9997:9997"   # （可选）API
+      - "1935:1935"   # （可选）RTMP
     environment:
       - MTX_PROTOCOLS=tcp,udp
       - MTX_RTSPADDRESS=:8554
       - MTX_WEBRTCENABLE=true
       - MTX_WEBRTCCERT=/cert.pem
       - MTX_WEBRTCKEY=/key.pem
-    # volumes:
-    #   - ./rtsp-config.yml:/mediamtx.yml:ro
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml
 
-  # MongoDB for tracking results persistence
+
+
+
+      # MongoDB for tracking results persistence
   mongodb:
     image: mongo:7.0
     container_name: mongodb

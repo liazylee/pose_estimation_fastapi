@@ -35,6 +35,17 @@ class RTSPStreamManager:
             "rtsp_url": None
         }
 
+    def get_active_streams(self) -> list[dict[str, str]]:
+        """
+        Get a list of active RTSP streams.
+
+        Returns:
+            List of dictionaries with stream status
+        """
+        # Placeholder implementation
+        # In a real implementation, this would return actual active streams
+        return []
+
 
 async def get_video_metadata(video_path: str):
     """Get duration, fps, width, height from video using ffprobe."""

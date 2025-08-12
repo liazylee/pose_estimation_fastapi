@@ -1,0 +1,25 @@
+# MediaMTX Configuration
+readTimeout: 1000s
+writeTimeout: 1000s
+# RTSP server
+rtspAddress: :8554
+rtspTransports: [ tcp, udp ]  # Updated from deprecated 'protocols'
+apiAddress: :9997
+api: yes
+# RTMP server
+rtmpAddress: :1935
+
+# WebRTC server
+webrtcAddress: :8888
+webrtc: yes
+# HLS server
+hlsAddress: :8889
+hls: yes
+#
+paths:
+  all:
+    source: publisher
+# Logging
+logLevel: info
+
+

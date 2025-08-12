@@ -1,115 +1,111 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import Hls from 'hls.js';
-import { Alert, Button, Group, SegmentedControl, Stack, Text } from '@mantine/core';
+import {Alert, Badge, Stack, Text} from '@mantine/core';
 
 type Props = {
-  path: string; // stream path e.g. outstream_<task_id>
+    path: string; // e.g. "outstream_<task_id>"
 };
 
-export default function MediaPlayer({ path }: Props) {
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const [mode, setMode] = useState<'webrtc' | 'hls'>('webrtc');
-  const [error, setError] = useState<string | null>(null);
-
-  const whepUrl = useMemo(() => `${location.protocol}//${location.host}/whep/${path}`, [path]);
-  const hlsUrl = useMemo(() => `${location.protocol}//${location.host}/hls/${path}/index.m3u8`, [path]);
-
-  useEffect(() => {
-    setError(null);
-    if (!videoRef.current) return;
-
-    if (mode === 'webrtc') {
-      // Cleanup any HLS instance
-      if (Hls.isSupported()) {
-        const v = videoRef.current as HTMLVideoElement;
-        if (v) {
-          try { v.pause(); v.removeAttribute('src'); v.load(); } catch {}
-        }
-      }
-
-      const pc = new RTCPeerConnection();
-      pcRef.current = pc;
-      pc.addTransceiver('video', { direction: 'recvonly' });
-      pc.ontrack = (e) => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = e.streams[0];
-          videoRef.current.play().catch(() => {});
-        }
-      };
-      pc.onconnectionstatechange = () => {
-        if (pc.connectionState === 'failed') setError('WebRTC 连接失败');
-      };
-      (async () => {
+// 放在组件外或上方
+async function waitForManifest(url: string, timeoutMs = 30000, intervalMs = 1000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
         try {
-          const offer = await pc.createOffer();
-          await pc.setLocalDescription(offer);
-          const res = await fetch(whepUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/sdp' },
-            body: offer.sdp,
-          });
-          if (!res.ok) throw new Error(`WHEP ${res.status}`);
-          const answerSdp = await res.text();
-          await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
-        } catch (e: any) {
-          setError(e?.message || 'WebRTC 播放失败');
-        }
-      })();
-
-      return () => {
-        pc.getSenders().forEach((s) => s.track?.stop());
-        pc.close();
-        pcRef.current = null;
-        if (videoRef.current) {
-          videoRef.current.srcObject = null;
-        }
-      };
-    } else {
-      // HLS fallback
-      try {
-        if (Hls.isSupported()) {
-          const hls = new Hls({ lowLatencyMode: true });
-          hls.loadSource(hlsUrl);
-          hls.attachMedia(videoRef.current);
-          hls.on(Hls.Events.ERROR, (_e, data) => {
-            if (data.fatal) setError('HLS 播放失败');
-          });
-          return () => {
-            hls.destroy();
-          };
-        } else if (videoRef.current?.canPlayType('application/vnd.apple.mpegurl')) {
-          // Safari native HLS
-          videoRef.current.src = hlsUrl;
-          videoRef.current.play().catch(() => {});
-          return () => {
-            if (videoRef.current) {
-              try { videoRef.current.pause(); } catch {}
+            const res = await fetch(url, {method: 'GET', cache: 'no-store'});
+            if (res.ok) {
+                // Additional check: try GET request to ensure content is available
+                const getRes = await fetch(url, {method: 'GET', cache: 'no-store'});
+                if (getRes.ok && getRes.headers.get('content-length') !== '0') {
+                    return true;
+                }
             }
-          };
-        } else {
-          setError('浏览器不支持 HLS');
+        } catch {
         }
-      } catch (e: any) {
-        setError(e?.message || 'HLS 播放失败');
-      }
+        await new Promise(r => setTimeout(r, intervalMs));
     }
-  }, [mode, whepUrl, hlsUrl]);
-
-  return (
-    <Stack>
-      <Group justify="space-between">
-        <SegmentedControl value={mode} onChange={(v: any) => setMode(v)} data={[
-          { label: 'WebRTC(低延迟)', value: 'webrtc' },
-          { label: 'HLS(兼容)', value: 'hls' },
-        ]} />
-        <Button variant="light" onClick={() => setMode(mode === 'webrtc' ? 'hls' : 'webrtc')}>切换</Button>
-      </Group>
-      {error && <Alert color="red">{error}</Alert>}
-      <video ref={videoRef} playsInline controls style={{ width: '100%', background: '#000', minHeight: 300 }} />
-      <Text size="xs" c="dimmed">路径: {path}</Text>
-    </Stack>
-  );
+    return false;
 }
 
+export default function MediaPlayerHLS({path}: Props) {
+    const videoRef = useRef<HTMLVideoElement | null>(null);
+    const [error, setError] = useState<string | null>(null);
 
+    // HLS 入口： http://<host>:8889/<path>/index.m3u8
+    const hlsUrl = useMemo(() => `http://localhost:8889/${path}/index.m3u8`, [path]);
+
+    useEffect(() => {
+        let hls: Hls | null = null;
+        let destroyed = false;
+
+        (async () => {
+            setError(null);
+            const video = videoRef.current;
+            if (!video) return;
+
+            const ready = await waitForManifest(hlsUrl);
+            if (!ready) {
+                setError('HLS manifest not ready (timeout)');
+                return;
+            }
+            if (destroyed) return;
+
+            try {
+                if (Hls.isSupported()) {
+                    hls = new Hls({
+                        lowLatencyMode: true,
+                        manifestLoadingRetryDelay: 1000,
+                        levelLoadingRetryDelay: 1000,
+                        fragLoadingRetryDelay: 1000,
+                    });
+                    hls.loadSource(hlsUrl);
+                    hls.attachMedia(video);
+                    // 等 manifest 解析后再 play，更稳
+                    hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                        video.play().catch(() => {
+                        });
+                    });
+                    hls.on(Hls.Events.ERROR, (_e, data) => {
+                        if (data.fatal) setError('HLS Playback failed: ' + data.type);
+                    });
+                } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                    video.src = hlsUrl;
+                    video.play().catch(() => {
+                    });
+                } else {
+                    setError('HLS is not supported in this browser');
+                }
+            } catch (e: any) {
+                setError(e?.message || 'HLS Playback failed');
+            }
+        })();
+
+        return () => {
+            destroyed = true;
+            try {
+                if (hls) hls.destroy();
+                const v = videoRef.current;
+                if (v) {
+                    v.pause();
+                    v.removeAttribute('src');
+                    v.load();
+                }
+            } catch {
+            }
+        };
+    }, [hlsUrl]);
+
+    return (
+        <Stack>
+            {error && <Alert color="red">{error}</Alert>}
+            <video
+                ref={videoRef}
+                playsInline
+                controls
+                style={{width: '100%', background: '#000', minHeight: 300}}
+            />
+            <Text size="xs" c="dimmed">
+                Path: <Badge variant="light">{path}</Badge>
+            </Text>
+        </Stack>
+    );
+}

@@ -231,10 +231,10 @@ class KafkaInput(ABC):
             await self.message_queue.put(message)
         if len(res) != total_frames:
             logger.error(f'the frame is not ordered')
-        logger.info(
-            f"Decoded {total_frames} frames (frame_id {frame_id_start} "
-            f"→ {frame_id_start + total_frames - 1})"
-        )
+        # logger.info(
+        #     f"Decoded {total_frames} frames (frame_id {frame_id_start} "
+        #     f"→ {frame_id_start + total_frames - 1})"
+        # )
 
     async def read_data(self) -> Optional[Dict[str, Any]]:
         """Read message from queue."""

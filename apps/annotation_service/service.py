@@ -12,12 +12,13 @@ from typing import Dict, Any, List
 
 import torch
 
+from contanos import MongoDBOutput
+
 # Add parent directories to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
 
 from contanos.ai_service import BaseAIService
 from contanos.io.kafka_input_interface import KafkaInput
-from contanos.io.mongodb_output_interface import MongoDBOutput
 from contanos.io.multi_output_interface import MultiOutputInterface
 from contanos.io.rtsp_output_interface import RTSPOutput
 from contanos.io.video_output_interface import VideoOutput

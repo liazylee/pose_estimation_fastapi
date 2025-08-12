@@ -39,14 +39,47 @@ class ByteTrackService(BaseAIService):
         return ByteTrackWorker
 
     def create_input_interfaces(self) -> List:
-        """Create Kafka input interface for detection results."""
+        """Create Kafka input interfaces for raw frames and detection results."""
         from contanos.io.kafka_input_interface import KafkaInput
         
-        input_config = self._get_kafka_input_config()
-        logger.info(f"Input topic: {input_config.get('topic')}")
-        logger.info(f"Consumer group: {input_config.get('group_id')}")
+        interfaces = []
+        bytetrack_config = self.config.get('bytetrack', {})
+        input_configs = bytetrack_config.get('input', {})
 
-        return [KafkaInput(config=input_config)]
+        # Handle multi-input configuration for BoTSORT
+        if isinstance(input_configs, dict) and 'raw_frames' in input_configs:
+            # Multi-input mode: raw_frames and detections
+            for input_name, input_spec in input_configs.items():
+                if input_spec.get('type') == 'kafka':
+                    config_str = input_spec.get('config', '')
+                    config_str = self._substitute_task_id(config_str)
+                    kafka_config = self._parse_kafka_config_string(config_str)
+                    
+                    # Add default consumer settings
+                    global_kafka = self.config.get('kafka', {})
+                    consumer_settings = global_kafka.get('consumer', {})
+                    
+                    final_config = {
+                        'bootstrap_servers': kafka_config.get('bootstrap_servers'),
+                        'topic': kafka_config.get('topic'),
+                        'group_id': kafka_config.get('group_id'),
+                        'auto_offset_reset': consumer_settings.get('auto_offset_reset', 'earliest'),
+                        'max_poll_records': consumer_settings.get('max_poll_records', 1),
+                        'consumer_timeout_ms': consumer_settings.get('consumer_timeout_ms', 1000),
+                        'enable_auto_commit': consumer_settings.get('enable_auto_commit', True),
+                        'input_name': input_name  # Add input name for identification
+                    }
+                    
+                    interfaces.append(KafkaInput(config=final_config))
+                    logger.info(f"{input_name} input - Topic: {final_config.get('topic')}, Group: {final_config.get('group_id')}")
+        else:
+            # Legacy single input mode (backward compatibility)
+            input_config = self._get_kafka_input_config()
+            logger.info(f"Legacy input topic: {input_config.get('topic')}")
+            logger.info(f"Legacy consumer group: {input_config.get('group_id')}")
+            interfaces.append(KafkaInput(config=input_config))
+
+        return interfaces
 
     def create_output_interface(self):
         """Create Kafka output interface for tracking results."""
@@ -58,13 +91,21 @@ class ByteTrackService(BaseAIService):
         return KafkaOutput(config=output_config)
 
     def get_model_config(self) -> dict:
-        """Get ByteTrack model configuration."""
+        """Get BoTSORT model configuration."""
         bytetrack_config = self.config.get('bytetrack', {})
         
         return {
-            'track_thresh': bytetrack_config.get('track_thresh', 0.45),
+            # BoTSORT specific parameters
+            'reid_weights': bytetrack_config.get('reid_weights', 'osnet_x0_25_msmt17.pt'),
+            'half': bytetrack_config.get('half', True),
+            'track_high_thresh': bytetrack_config.get('track_high_thresh', 0.6),
+            'track_low_thresh': bytetrack_config.get('track_low_thresh', 0.1),
+            'new_track_thresh': bytetrack_config.get('new_track_thresh', 0.7),
+            'track_buffer': bytetrack_config.get('track_buffer', 30),
             'match_thresh': bytetrack_config.get('match_thresh', 0.8),
-            'track_buffer': bytetrack_config.get('track_buffer', 25),
+            'cmc_method': bytetrack_config.get('cmc_method', 'ecc'),
+            # Legacy parameters (backward compatibility)
+            'track_thresh': bytetrack_config.get('track_thresh', 0.45),
             'frame_rate': bytetrack_config.get('frame_rate', 25),
             'per_class': bytetrack_config.get('per_class', False)
         }

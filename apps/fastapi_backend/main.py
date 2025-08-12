@@ -7,8 +7,9 @@ from contextlib import asynccontextmanager
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.responses import FileResponse
 
 from config import APP_TITLE, APP_VERSION, STATIC_DIR, CORS_SETTINGS, logger, FRONTEND_DIST_DIR
 from dependencies import initialize_services, cleanup_services
@@ -51,9 +52,45 @@ app.add_middleware(CORSMiddleware, **CORS_SETTINGS)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Mount SPA (if built)
-if FRONTEND_DIST_DIR.exists():
-    app.mount("/app", StaticFiles(directory=str(FRONTEND_DIST_DIR), html=True), name="app")
+frontend_built = FRONTEND_DIST_DIR.exists() and (FRONTEND_DIST_DIR / "index.html").exists()
+if frontend_built:
+    logger.info(f"Frontend build found at: {FRONTEND_DIST_DIR}")
 
+    # 挂载静态资源（JS, CSS, 图片等）
+    assets_dir = FRONTEND_DIST_DIR / "assets"
+    if assets_dir.exists():
+        app.mount("/app/assets", StaticFiles(directory=str(assets_dir)), name="frontend_assets")
+
+
+    # 处理 SPA 路由：所有 /app/* 路径都返回 index.html
+    @app.get("/app/{path:path}")
+    async def serve_spa(path: str):
+        """服务 SPA 应用，支持客户端路由"""
+        index_file = FRONTEND_DIST_DIR / "index.html"
+        if index_file.exists():
+            return FileResponse(str(index_file))
+        else:
+            logger.error(f"index.html not found at: {index_file}")
+            return {"error": "Frontend not built"}
+
+
+    @app.get("/app")
+    async def serve_spa_root():
+        """处理 /app 根路径"""
+        return RedirectResponse(url="/app/")
+
+
+    @app.get("/app/")
+    async def serve_spa_index():
+        """处理 /app/ 路径"""
+        index_file = FRONTEND_DIST_DIR / "index.html"
+        if index_file.exists():
+            return FileResponse(str(index_file))
+        else:
+            logger.error(f"index.html not found at: {index_file}")
+            return {"error": "Frontend not built"}
+else:
+    logger.warning(f"Frontend not built. Expected location: {FRONTEND_DIST_DIR}")
 # Include all routers
 app.include_router(core_router, tags=["core"])
 app.include_router(video_router, tags=["video"])
@@ -62,6 +99,7 @@ app.include_router(streams_router, tags=["streams"])
 app.include_router(ai_services_router, tags=["ai_services"])
 app.include_router(websocket_pose_router, tags=["websocket_pose"])
 
+
 # Redirect root to SPA if present
 @app.get("/")
 async def root_redirect():
@@ -69,6 +107,7 @@ async def root_redirect():
         return RedirectResponse(url="/app/")
     # Fallback to server-side dashboard route
     return RedirectResponse(url="/dashboard")
+
 
 if __name__ == "__main__":
     import argparse
