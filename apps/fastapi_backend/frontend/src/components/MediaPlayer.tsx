@@ -4,6 +4,7 @@ import {Alert, Badge, Stack, Text} from '@mantine/core';
 
 type Props = {
     path: string; // e.g. "outstream_<task_id>"
+    onSizeReady?: (width: number, height: number) => void;
 };
 
 // 放在组件外或上方
@@ -26,13 +27,30 @@ async function waitForManifest(url: string, timeoutMs = 30000, intervalMs = 1000
     return false;
 }
 
-export default function MediaPlayerHLS({path}: Props) {
+export default function MediaPlayerHLS({path, onSizeReady}: Props) {
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     // HLS 入口： http://<host>:8889/<path>/index.m3u8
     const hlsUrl = useMemo(() => `http://localhost:8889/${path}/index.m3u8`, [path]);
 
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video) return;
+
+        const handleLoaded = () => {
+            if (video.videoWidth && video.videoHeight && typeof onSizeReady === 'function') {
+                onSizeReady(video.videoWidth, video.videoHeight);
+            }
+        };
+
+        video.addEventListener('loadedmetadata', handleLoaded);
+        return () => {
+            video.removeEventListener('loadedmetadata', handleLoaded);
+        };
+    }, [onSizeReady]);
+
+    // HLS 播放逻辑
     useEffect(() => {
         let hls: Hls | null = null;
         let destroyed = false;
@@ -59,7 +77,6 @@ export default function MediaPlayerHLS({path}: Props) {
                     });
                     hls.loadSource(hlsUrl);
                     hls.attachMedia(video);
-                    // 等 manifest 解析后再 play，更稳
                     hls.on(Hls.Events.MANIFEST_PARSED, () => {
                         video.play().catch(() => {
                         });
@@ -93,7 +110,6 @@ export default function MediaPlayerHLS({path}: Props) {
             }
         };
     }, [hlsUrl]);
-
     return (
         <Stack>
             {error && <Alert color="red">{error}</Alert>}

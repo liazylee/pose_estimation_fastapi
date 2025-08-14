@@ -108,7 +108,7 @@ class PoseDataStreamer:
             self.client.close()
             logger.info("Disconnected from MongoDB")
 
-    async def stream_pose_data(self, task_id: str, simulate_realtime: bool = False, fps: float = 30.0):
+    async def stream_pose_data(self, task_id: str, simulate_realtime: bool = False, fps: float = 25.0):
         """Stream pose data for a specific task_id."""
         if self.collection is None:
             await self.connect_to_mongodb()
@@ -236,8 +236,8 @@ async def websocket_pose_endpoint(websocket: WebSocket, task_id: str):
     query_params = parse_qs(str(websocket.url.query))
 
     # Check if simulation mode is requested
-    simulate_realtime = query_params.get('simulate', ['false'])[0].lower() == 'true'
-    fps = float(query_params.get('fps', ['30.0'])[0])
+    simulate_realtime = query_params.get('simulate', ['true'])[0].lower() == 'true'
+    fps = float(query_params.get('fps', ['25.0'])[0])
 
     # Validate FPS range
     if fps <= 0 or fps > 120:
