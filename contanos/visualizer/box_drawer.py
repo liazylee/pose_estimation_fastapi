@@ -86,9 +86,12 @@ def draw_boxes_on_frame(frame: np.ndarray,
             s_track_id += 1
         # draw the bounding box
         cv.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
-        if draw_labels:
-            color = get_track_color(track_id)
+        color = get_track_color(track_id)
+        speed_kmh = detection.get('speed_kmh', None)
+        if speed_kmh is not None:
+            label = f"ID: {track_id} {speed_kmh:.1f} km/h"
+        else:
             label = f"ID: {track_id}"
-            cv.putText(frame, label, (x1, y1 - 5), cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+        cv.putText(frame, label, (x1, y1 - 5), cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
     return frame

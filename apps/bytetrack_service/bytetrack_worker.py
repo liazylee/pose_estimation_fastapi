@@ -6,11 +6,14 @@ Optimized for pose estimation pipeline with stable track ID assignment.
 import logging
 import os
 import sys
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict
 
 import numpy as np
+
 from contanos import deserialize_image_from_kafka
+from .helper import _parse_ts
 
 # Add parent directories to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
@@ -38,14 +41,18 @@ except ImportError:
 class ByteTrackWorker(BaseWorker):
     """BoTSORT tracking worker with ByteTracker fallback for pose estimation pipeline."""
 
-    def __init__(self, worker_id: int, device: str, model_config: Dict, 
+    def __init__(self, worker_id: int, device: str, model_config: Dict,
                  input_interface, output_interface):
         super().__init__(worker_id, device, model_config, input_interface, output_interface)
-        
+
         self.current_task_id = None
         self.tracker = None
         self.tracker_type = "unknown"
-        
+        self.meters_per_pixel = float(self.model_config.get('meters_per_pixel', 0.0))  # 没有标定就用 0
+        self.frame_rate = float(self.model_config.get('frame_rate', 25))  # 已在配置中提供
+        self._last_state = {}
+        self._track_history = {}  # {track_id: deque([(ts, cx, cy, h), ...])}
+        self._speed_smoothed = {}  # {track_id: smoothed_speed_mps}
         logging.info(f"BoTSORT Worker {worker_id} initializing on device {device}")
         self._model_init()
 
@@ -55,7 +62,7 @@ class ByteTrackWorker(BaseWorker):
             # Initialize BoTSORT
             reid_weights_str = self.model_config.get('reid_weights', 'osnet_x0_25_msmt17.pt')
             reid_weights_path = None
-            
+
             if reid_weights_str:
                 reid_weights_path = Path(reid_weights_str)
                 if not reid_weights_path.exists():
@@ -75,10 +82,10 @@ class ByteTrackWorker(BaseWorker):
             )
             self.tracker_type = "BoTSORT"
             logging.info(f"BoTSORT initialized on {self.device}")
-            
+
         except Exception as e:
             logging.error(f"BoTSORT initialization failed: {e}, falling back to ByteTracker")
-            
+
             try:
                 self.tracker = ByteTracker(
                     track_thresh=self.model_config.get('track_high_thresh', 0.3),
@@ -88,21 +95,21 @@ class ByteTrackWorker(BaseWorker):
                 )
                 self.tracker_type = "ByteTracker"
                 logging.info(f"ByteTracker fallback initialized")
-                
+
             except Exception as fallback_e:
                 logging.error(f"Both BoTSORT and ByteTracker failed: {e}, {fallback_e}")
                 raise Exception("Tracker initialization failed")
-        
+
         if self.tracker is None:
             raise Exception("Tracker is None after initialization")
 
     def _predict(self, inputs: Dict) -> Any:
         """
         Perform tracking on detected objects.
-        
+
         Args:
             inputs: Input data containing frame and detections
-            
+
         Returns:
             Tracking results with stable track IDs
         """
@@ -114,7 +121,7 @@ class ByteTrackWorker(BaseWorker):
             task_id = inputs.get('task_id')
             frame_id = inputs.get('frame_id', 0)
             timestamp = inputs.get('timestamp')
-            
+
             # Convert detections to numpy format: [x1, y1, x2, y2, score, class_id]
             if len(detections_list) > 0:
                 detections = np.array([
@@ -123,12 +130,12 @@ class ByteTrackWorker(BaseWorker):
                 ], dtype=np.float32)
             else:
                 detections = np.empty((0, 6), dtype=np.float32)
-            
+
             # Check tracker initialization
             if self.tracker is None:
                 logging.error(f"Worker {self.worker_id}: Tracker not initialized")
                 return self._empty_result(task_id, frame_id, timestamp)
-            
+
             # Perform tracking based on tracker type
             if self.tracker_type == "BoTSORT":
                 tracks = self._track_with_botsort(detections, frame)
@@ -137,30 +144,88 @@ class ByteTrackWorker(BaseWorker):
             else:
                 logging.error(f"Unknown tracker type: {self.tracker_type}")
                 return self._empty_result(task_id, frame_id, timestamp)
-            
+            self._attach_speed(tracks, timestamp)
             return {
                 "task_id": task_id,
                 "frame_id": frame_id,
                 "timestamp": timestamp,
                 "tracked_poses": tracks
             }
-            
+
         except Exception as e:
             logging.error(f"Worker {self.worker_id} ({self.tracker_type}) prediction error: {e}")
             return self._empty_result(
-                inputs.get('task_id'), 
-                inputs.get('frame_id', 0), 
+                inputs.get('task_id'),
+                inputs.get('frame_id', 0),
                 inputs.get('timestamp')
             )
+
+    def _attach_speed(self, tracks: list, timestamp):
+        ts_curr = _parse_ts(timestamp)
+        if ts_curr is None:
+            ts_curr = self._last_ts + 1.0 / max(self.frame_rate, 1e-6) if hasattr(self, "_last_ts") else 0
+        self._last_ts = ts_curr
+
+        for t in tracks:
+            tid = t["track_id"]
+            x1, y1, x2, y2 = t["bbox"]
+            cx = 0.5 * (x1 + x2)
+            cy = 0.5 * (y1 + y2)
+            h = max(1.0, y2 - y1)
+
+            # 初始化轨迹缓存
+            if tid not in self._track_history:
+                self._track_history[tid] = deque(maxlen=int(self.frame_rate * 2))  # 存最多2秒
+            if tid not in self._speed_smoothed:
+                self._speed_smoothed[tid] = 0.0
+
+            history = self._track_history[tid]
+            history.append((ts_curr, cx, cy, h))
+
+            # 清理超过1.5秒的点，保留更多历史数据
+            while history and (ts_curr - history[0][0]) > 1.5:
+                history.popleft()
+
+            # 计算原始速度
+            raw_speed = 0.0
+            if len(history) >= 8:  # 增加到至少8个点来减少噪声
+                times = np.array([pt[0] for pt in history])
+                x_coords = np.array([pt[1] for pt in history])
+                y_coords = np.array([pt[2] for pt in history])
+
+                dt_total = times[-1] - times[0]
+                if dt_total > 0.3:  # 增加到至少0.3秒时间跨度
+                    dx_total = x_coords[-1] - x_coords[0]
+                    dy_total = y_coords[-1] - y_coords[0]
+                    pixel_dist = (dx_total ** 2 + dy_total ** 2) ** 0.5
+
+                    mpp = self.meters_per_pixel
+                    if mpp <= 0:
+                        mpp = 1.70 / max(h, 1.0)
+
+                    raw_speed = (pixel_dist * mpp) / dt_total
+
+                    # 人类速度限制：最大12m/s (约43km/h)
+                    max_speed_mps = 12.0
+                    raw_speed = min(raw_speed, max_speed_mps)
+
+            # 指数移动平均平滑，更小的平滑系数
+            alpha = 0.15  # 平滑系数减小，更加平滑
+            self._speed_smoothed[tid] = alpha * raw_speed + (1 - alpha) * self._speed_smoothed[tid]
+
+            t["speed_mps"] = float(self._speed_smoothed[tid])
+            t["speed_kmh"] = float(self._speed_smoothed[tid] * 3.6)
+
+            self._last_state[tid] = {"cx": cx, "cy": cy, "ts": timestamp, "h": h}
 
     def _track_with_botsort(self, detections: np.ndarray, frame: np.ndarray) -> list:
         """Track using BoTSORT."""
         if frame is None:
             logging.warning("Frame is None for BoTSORT tracking")
             return []
-        
+
         outputs = self.tracker.update(detections, frame)
-        
+
         tracks = []
         if outputs is not None:
             for output in outputs:
@@ -172,7 +237,7 @@ class ByteTrackWorker(BaseWorker):
                         "score": float(score),
                         "class_id": int(cls)
                     })
-        
+
         return tracks
 
     def _track_with_bytetracker(self, detections_list: list, frame_id: int) -> list:
@@ -185,9 +250,9 @@ class ByteTrackWorker(BaseWorker):
                 'confidence': det.get('score', 0.0),
                 'class_id': det.get('class_id', 0)
             })
-        
+
         tracked_objects = self.tracker.update(bytetrack_detections, frame_id)
-        
+
         tracks = []
         for obj in tracked_objects:
             tracks.append({
@@ -196,7 +261,7 @@ class ByteTrackWorker(BaseWorker):
                 "score": obj['score'],
                 "class_id": obj.get('class_id', 0)
             })
-        
+
         return tracks
 
     def _empty_result(self, task_id, frame_id, timestamp):
