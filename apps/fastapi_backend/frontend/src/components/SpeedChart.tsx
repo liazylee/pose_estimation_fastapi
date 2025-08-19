@@ -52,6 +52,17 @@ export default function SpeedChart({
     const [startTime, setStartTime] = useState<number | null>(null);
     const [maxTimeRange, setMaxTimeRange] = useState<number>(30); // 初始30秒窗口
 
+    // Reset data when frameData becomes null (manual reconnect)
+    useEffect(() => {
+        if (frameData === null) {
+            setSpeedData([]);
+            setStartTime(null);
+            setMaxTimeRange(30);
+            setAvailableTrackIds([]);
+            return;
+        }
+    }, [frameData]);
+
     // 处理传入的帧数据
     useEffect(() => {
         if (!frameData) return;
@@ -105,6 +116,23 @@ export default function SpeedChart({
         }
 
         setSpeedData(prev => {
+            // For better line continuity, ensure all previous track IDs have values in the new point
+            // Fill missing track IDs with null or last known value
+            const allTrackIds = new Set([...availableTrackIds, ...currentTrackIds]);
+            allTrackIds.forEach(trackId => {
+                const key = `track_${trackId}`;
+                if (speedPoint[key] === undefined) {
+                    // Try to use the last known value for this track to maintain continuity
+                    const lastPoint = prev[prev.length - 1];
+                    if (lastPoint && lastPoint[key] !== undefined) {
+                        // Use a slightly decayed value to gradually reduce speed when track is lost
+                        speedPoint[key] = Math.max(0, lastPoint[key] * 0.9);
+                    } else {
+                        speedPoint[key] = 0;
+                    }
+                }
+            });
+
             const newData = [...prev, speedPoint];
             
             // 动态调整时间窗口
@@ -310,15 +338,16 @@ export default function SpeedChart({
                         {displayLines.map(line => (
                             <Line
                                 key={line.key}
-                                type="monotone"
+                                type="linear"
                                 dataKey={line.key}
                                 stroke={line.color}
                                 strokeWidth={2}
-                                dot={false}
+                                dot={{fill: line.color, strokeWidth: 1, r: 1}}
+                                activeDot={{r: 4, fill: line.color}}
                                 name={line.name}
-                                connectNulls={false}
-                                strokeDasharray={undefined}
-                                animationDuration={300}
+                                connectNulls={true}
+                                animationDuration={0}
+                                isAnimationActive={false}
                             />
                         ))}
                     </LineChart>

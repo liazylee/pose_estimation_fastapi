@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useParams} from 'react-router-dom';
-import {Alert, Badge, Card, Group, Stack, Switch, Text, TextInput, Title, Grid, Container, SimpleGrid} from '@mantine/core';
+import {Alert, Badge, Card, Container, Group, SimpleGrid, Stack, Switch, Text, TextInput, Title} from '@mantine/core';
 import {getAnnotationRtsp, getPipelineStatus, getTaskStatus} from '@/api';
 import MediaPlayer from '@/components/MediaPlayer';
 import VideoLikePoseCanvas2D from "@/components/VideoLikePoseCanvas2D";
@@ -26,12 +26,12 @@ class SharedWebSocketManager {
     private maxDelay = 30000;
     private retryTimeout: NodeJS.Timeout | null = null;
     private isManuallyDisconnected = false;
-    
+
     private onMessage: (data: any) => void;
     private onStateChange: (state: ConnectionState, error?: string) => void;
 
     constructor(
-        wsUrl: string, 
+        wsUrl: string,
         onMessage: (data: any) => void,
         onStateChange: (state: ConnectionState, error?: string) => void
     ) {
@@ -51,7 +51,7 @@ class SharedWebSocketManager {
 
         try {
             this.ws = new WebSocket(this.wsUrl);
-            
+
             this.ws.onopen = () => {
                 console.log('Shared WebSocket connected');
                 this.retryAttempts = 0;
@@ -70,7 +70,7 @@ class SharedWebSocketManager {
             this.ws.onclose = (evt) => {
                 console.log('Shared WebSocket closed:', evt.code, evt.reason);
                 this.ws = null;
-                
+
                 if (!this.isManuallyDisconnected) {
                     this.scheduleReconnect();
                 } else {
@@ -97,14 +97,14 @@ class SharedWebSocketManager {
         }
 
         this.retryAttempts++;
-        
+
         const delay = Math.min(
             this.baseDelay * Math.pow(2, this.retryAttempts - 1),
             this.maxDelay
         );
-        
+
         console.log(`Scheduling shared WebSocket reconnect attempt ${this.retryAttempts}/${this.maxRetries} in ${delay}ms`);
-        
+
         this.retryTimeout = setTimeout(() => {
             this.connect();
         }, delay);
@@ -112,17 +112,17 @@ class SharedWebSocketManager {
 
     disconnect(): void {
         this.isManuallyDisconnected = true;
-        
+
         if (this.retryTimeout) {
             clearTimeout(this.retryTimeout);
             this.retryTimeout = null;
         }
-        
+
         if (this.ws) {
             this.ws.close();
             this.ws = null;
         }
-        
+
         this.onStateChange(ConnectionState.DISCONNECTED);
     }
 
@@ -134,7 +134,7 @@ class SharedWebSocketManager {
 
     getConnectionState(): ConnectionState {
         if (!this.ws) return ConnectionState.DISCONNECTED;
-        
+
         switch (this.ws.readyState) {
             case WebSocket.CONNECTING:
                 return this.retryAttempts > 0 ? ConnectionState.RECONNECTING : ConnectionState.CONNECTING;
@@ -148,7 +148,7 @@ class SharedWebSocketManager {
     }
 
     getRetryInfo(): { attempts: number; maxRetries: number } {
-        return { attempts: this.retryAttempts, maxRetries: this.maxRetries };
+        return {attempts: this.retryAttempts, maxRetries: this.maxRetries};
     }
 }
 
@@ -167,16 +167,16 @@ export default function TaskDetail() {
     const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null);
     const [availableTrackIds, setAvailableTrackIds] = useState<number[]>([]);
     const [renderMode, setRenderMode] = useState<'all' | 'single'>('single');
-    
+
     // 速度图表状态
     const [showAllTracksSpeed, setShowAllTracksSpeed] = useState<boolean>(false);
-    
+
     // 共享WebSocket状态
     const wsManagerRef = useRef<SharedWebSocketManager | null>(null);
     const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
     const [connectionError, setConnectionError] = useState<string>('');
-    const [retryInfo, setRetryInfo] = useState({ attempts: 0, maxRetries: 10 });
-    
+    const [retryInfo, setRetryInfo] = useState({attempts: 0, maxRetries: 10});
+
     // WebSocket数据状态
     const [latestFrameData, setLatestFrameData] = useState<any>(null);
 
@@ -253,7 +253,7 @@ export default function TaskDetail() {
     const handleWebSocketStateChange = useCallback((state: ConnectionState, error?: string) => {
         setConnectionState(state);
         setConnectionError(error || '');
-        
+
         if (wsManagerRef.current) {
             setRetryInfo(wsManagerRef.current.getRetryInfo());
         }
@@ -303,7 +303,7 @@ export default function TaskDetail() {
                 <Title order={2}>Task {taskId} - Dashboard</Title>
                 <Group>
                     {status?.status && (
-                        <Badge 
+                        <Badge
                             size="lg"
                             color={status?.status === 'completed' ? 'green' : 'yellow'}
                         >
@@ -330,7 +330,7 @@ export default function TaskDetail() {
                         size="md"
                     />
                 </Group>
-                
+
                 {/* Track 选择器 - 只在单人模式显示 */}
                 {renderMode === 'single' && (
                     <TrackSelector
@@ -350,7 +350,7 @@ export default function TaskDetail() {
             </Card>
 
             {/* 主要内容区域 - Dashboard 布局 */}
-            <SimpleGrid cols={{ base: 1, md: 2 }} spacing="lg">
+            <SimpleGrid cols={{base: 1, md: 2}} spacing="lg">
                 {/* 左列：视频播放 */}
                 <Card withBorder>
                     <Stack gap="sm">
@@ -358,13 +358,6 @@ export default function TaskDetail() {
                             <Text fw={600}>📹 Processed Video Stream</Text>
                             <Badge variant="outline">RTSP</Badge>
                         </Group>
-                        <Text size="sm" c="dimmed">RTSP: {rtsp || 'not available'}</Text>
-                        <TextInput
-                            placeholder="test url (optional)"
-                            value={testUrl}
-                            onChange={(e) => setTestUrl(e.currentTarget.value)}
-                            size="sm"
-                        />
                         <div style={{width: '100%'}} ref={containerRef}>
                             <MediaPlayer
                                 path={(rtsp || '').replace('rtsp://localhost:8554/', '') || testUrl || ''}
@@ -377,7 +370,19 @@ export default function TaskDetail() {
                                     setSize({w: containerWidth, h: containerHeight});
                                 }}
                             />
+
                         </div>
+                        <Group justify="space-between" align="center">
+                            <Text fw={600}>📹 Processed Video Stream</Text>
+                            <Badge variant="outline">RTSP</Badge>
+                        </Group>
+                        <Text size="sm" c="dimmed">RTSP: {rtsp || 'not available'}</Text>
+                        <TextInput
+                            placeholder="test url (optional)"
+                            value={testUrl}
+                            onChange={(e) => setTestUrl(e.currentTarget.value)}
+                            size="sm"
+                        />
                     </Stack>
                 </Card>
 
