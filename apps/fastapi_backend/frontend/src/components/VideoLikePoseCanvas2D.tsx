@@ -2,9 +2,15 @@
 import React, {useCallback, useEffect, useRef, useState} from "react";
 
 type PoseCanvasProps = {
-    wsUrl: string;
+    frameData: any; // WebSocket数据从父组件传入
+    connectionState: ConnectionState;
+    connectionError: string;
+    retryInfo: { attempts: number; maxRetries: number };
+    onManualReconnect: () => void;
     width: number;
     height: number;
+    videoWidth?: number;  // 视频真实宽度
+    videoHeight?: number; // 视频真实高度
     selectedTrackId?: number | null;
     showSkeleton?: boolean;
     showJoints?: boolean;
@@ -15,6 +21,15 @@ type PoseCanvasProps = {
     bufferSize?: number; // 缓冲区大小，默认50帧
     onTrackIdsUpdate?: (trackIds: number[]) => void;
 };
+
+// WebSocket 连接状态
+enum ConnectionState {
+    DISCONNECTED = 'disconnected',
+    CONNECTING = 'connecting',
+    CONNECTED = 'connected',
+    RECONNECTING = 'reconnecting',
+    ERROR = 'error'
+}
 
 // 帧数据结构
 interface FrameData {
@@ -101,6 +116,7 @@ class PlaybackController {
     }
 }
 
+
 const PART_CONNECTIONS: Record<string, [number, number][]> = {
     head: [[0, 1], [0, 2], [1, 3], [2, 4]],
     torso: [[5, 11], [6, 12], [11, 12]],
@@ -134,9 +150,15 @@ const TRACK_COLORS = ["#00ffff", "#ff00ff", "#ffff00", "#800080", "#ffa500", "#0
 const getTrackColor = (id: number) => TRACK_COLORS[Math.abs(id) % TRACK_COLORS.length];
 
 export default function VideoLikePoseCanvas2D({
-                                                  wsUrl,
+                                                  frameData,
+                                                  connectionState,
+                                                  connectionError,
+                                                  retryInfo,
+                                                  onManualReconnect,
                                                   width,
                                                   height,
+                                                  videoWidth = width,
+                                                  videoHeight = height,
                                                   selectedTrackId = null,
                                                   showSkeleton = true,
                                                   showJoints = true,
@@ -148,7 +170,6 @@ export default function VideoLikePoseCanvas2D({
                                                   onTrackIdsUpdate
                                               }: PoseCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
-    const wsRef = useRef<WebSocket | null>(null);
     const animationRef = useRef<number | null>(null);
 
     // 帧缓冲和播放控制
@@ -170,6 +191,15 @@ export default function VideoLikePoseCanvas2D({
     });
 
     const fpsCounterRef = useRef({frames: 0, lastTime: performance.now()});
+
+    // 坐标转换函数：从视频坐标系转换到Canvas坐标系
+    const transformCoordinate = useCallback((x: number, y: number): [number, number] => {
+        // 计算缩放比例
+        const scaleX = width / videoWidth;
+        const scaleY = height / videoHeight;
+        
+        return [x * scaleX, y * scaleY];
+    }, [width, height, videoWidth, videoHeight]);
 
     // 绘制单帧
     const drawFrame = useCallback((frameData: FrameData) => {
@@ -216,6 +246,9 @@ export default function VideoLikePoseCanvas2D({
             ctx.lineJoin = 'round';
             ctx.imageSmoothingEnabled = true;
 
+            // 转换关键点坐标
+            const transformedJoints = joints.map(([x, y]) => transformCoordinate(x, y));
+
             // 绘制骨架
             if (showSkeleton) {
                 ctx.lineWidth = 3;
@@ -226,8 +259,8 @@ export default function VideoLikePoseCanvas2D({
 
                     ctx.beginPath();
                     for (const [a, b] of PART_CONNECTIONS[part]) {
-                        const A = joints[a];
-                        const B = joints[b];
+                        const A = transformedJoints[a];
+                        const B = transformedJoints[b];
                         if (!A || !B) continue;
 
                         ctx.moveTo(Math.round(A[0]), Math.round(A[1]));
@@ -239,8 +272,8 @@ export default function VideoLikePoseCanvas2D({
 
             // 绘制关键点
             if (showJoints) {
-                for (let j = 0; j < joints.length; j++) {
-                    const [x, y] = joints[j] || [];
+                for (let j = 0; j < transformedJoints.length; j++) {
+                    const [x, y] = transformedJoints[j] || [];
                     if (x == null || y == null) continue;
 
                     const partColor = limbColorMode === "python" ? PART_COLORS[JOINT_PART[j]] : color;
@@ -255,11 +288,13 @@ export default function VideoLikePoseCanvas2D({
             // 绘制边界框
             if (showBBoxes && bbox && bbox.length === 4) {
                 const [x1, y1, x2, y2] = bbox;
+                const [tx1, ty1] = transformCoordinate(x1, y1);
+                const [tx2, ty2] = transformCoordinate(x2, y2);
 
                 ctx.strokeStyle = color || "#ffffff";
                 ctx.lineWidth = 2;
                 ctx.setLineDash([8, 4]);
-                ctx.strokeRect(Math.round(x1), Math.round(y1), Math.round(x2 - x1), Math.round(y2 - y1));
+                ctx.strokeRect(Math.round(tx1), Math.round(ty1), Math.round(tx2 - tx1), Math.round(ty2 - ty1));
                 ctx.setLineDash([]);
 
                 // 标签
@@ -270,11 +305,11 @@ export default function VideoLikePoseCanvas2D({
 
                 ctx.fillStyle = color || "#ffffff";
                 ctx.globalAlpha = 0.8;
-                ctx.fillRect(x1, Math.max(0, y1 - 30), textWidth + padding * 2, 24);
+                ctx.fillRect(tx1, Math.max(0, ty1 - 30), textWidth + padding * 2, 24);
 
                 ctx.globalAlpha = 1;
                 ctx.fillStyle = "#000000";
-                ctx.fillText(text, x1 + padding, Math.max(18, y1 - 10));
+                ctx.fillText(text, tx1 + padding, Math.max(18, ty1 - 10));
             }
         });
 
@@ -289,7 +324,7 @@ export default function VideoLikePoseCanvas2D({
             counter.lastTime = now;
         }
 
-    }, [width, height, selectedTrackId, showSkeleton, showJoints, showBBoxes, limbColorMode, availableTrackIds, onTrackIdsUpdate]);
+    }, [width, height, videoWidth, videoHeight, selectedTrackId, showSkeleton, showJoints, showBBoxes, limbColorMode, availableTrackIds, onTrackIdsUpdate, transformCoordinate]);
 
     // 播放循环
     const playLoop = useCallback(() => {
@@ -318,10 +353,27 @@ export default function VideoLikePoseCanvas2D({
                         ctx.fillStyle = '#111';
                         ctx.fillRect(0, 0, width, height);
 
-                        ctx.fillStyle = '#666';
                         ctx.font = '16px sans-serif';
                         ctx.textAlign = 'center';
-                        ctx.fillText('Buffering...', width / 2, height / 2);
+                        
+                        // 根据连接状态显示不同消息
+                        if (connectionState === ConnectionState.DISCONNECTED || connectionState === ConnectionState.ERROR) {
+                            ctx.fillStyle = '#ff4444';
+                            ctx.fillText('WebSocket Disconnected', width / 2, height / 2 - 10);
+                            ctx.fillStyle = '#666';
+                            ctx.font = '12px sans-serif';
+                            ctx.fillText('Click Retry button or check backend status', width / 2, height / 2 + 15);
+                        } else if (connectionState === ConnectionState.CONNECTING || connectionState === ConnectionState.RECONNECTING) {
+                            ctx.fillStyle = '#ffaa00';
+                            const message = connectionState === ConnectionState.RECONNECTING 
+                                ? `Reconnecting... (${retryInfo.attempts}/${retryInfo.maxRetries})`
+                                : 'Connecting...';
+                            ctx.fillText(message, width / 2, height / 2);
+                        } else {
+                            ctx.fillStyle = '#666';
+                            ctx.fillText('Buffering...', width / 2, height / 2);
+                        }
+                        
                         ctx.textAlign = 'left';
                     }
                 }
@@ -329,7 +381,7 @@ export default function VideoLikePoseCanvas2D({
         }
 
         animationRef.current = requestAnimationFrame(playLoop);
-    }, [drawFrame, width, height]);
+    }, [drawFrame, width, height, connectionState, retryInfo]);
 
     // 播放控制函数
     const togglePlayback = useCallback(() => {
@@ -347,34 +399,28 @@ export default function VideoLikePoseCanvas2D({
         setPlaybackFps(fps);
     }, []);
 
-    // WebSocket 数据接收
+    // 处理传入的帧数据
     useEffect(() => {
-        const ws = new WebSocket(wsUrl);
-        wsRef.current = ws;
+        if (!frameData) return;
 
-        ws.onmessage = (evt) => {
-            try {
-                const data = JSON.parse(evt.data);
-                const frame = data?.tracked_poses_results ? data : data?.results?.[0];
-                if (!frame) return;
+        const frame = frameData?.tracked_poses_results ? frameData : frameData?.results?.[0];
+        if (!frame) return;
 
-                // 添加到缓冲区而不是立即渲染
-                frameBuffer.current.addFrame(frame);
+        // 添加到缓冲区而不是立即渲染
+        frameBuffer.current.addFrame(frame);
 
-                setStats(prev => ({
-                    ...prev,
-                    receivedFrames: prev.receivedFrames + 1
-                }));
+        setStats(prev => ({
+            ...prev,
+            receivedFrames: prev.receivedFrames + 1
+        }));
+    }, [frameData]);
 
-            } catch (e) {
-                console.warn("Failed to parse WS:", e);
-            }
-        };
-
-        return () => {
-            ws.close();
-        };
-    }, [wsUrl]);
+    // 清空缓冲区的处理函数
+    const handleClearBuffer = useCallback(() => {
+        frameBuffer.current.clear();
+        setStats(prev => ({ ...prev, receivedFrames: 0, playedFrames: 0 }));
+        onManualReconnect();
+    }, [onManualReconnect]);
 
     // 启动播放循环
     useEffect(() => {
@@ -391,8 +437,68 @@ export default function VideoLikePoseCanvas2D({
         changeFps(targetFps);
     }, [targetFps, changeFps]);
 
+    // 获取连接状态显示信息
+    const getConnectionStatusInfo = () => {
+        switch (connectionState) {
+            case ConnectionState.CONNECTED:
+                return { icon: "🟢", text: "Connected", color: "#44ff44" };
+            case ConnectionState.CONNECTING:
+                return { icon: "🟡", text: "Connecting...", color: "#ffaa00" };
+            case ConnectionState.RECONNECTING:
+                return { icon: "🟡", text: `Reconnecting... (${retryInfo.attempts}/${retryInfo.maxRetries})`, color: "#ffaa00" };
+            case ConnectionState.ERROR:
+                return { icon: "🔴", text: connectionError || "Connection Error", color: "#ff4444" };
+            case ConnectionState.DISCONNECTED:
+            default:
+                return { icon: "⚫", text: "Disconnected", color: "#666666" };
+        }
+    };
+
+    const connectionStatus = getConnectionStatusInfo();
+
     return (
         <div style={{position: "relative"}}>
+            {/* 连接状态指示器 */}
+            <div
+                style={{
+                    position: "absolute",
+                    top: 8,
+                    right: 8,
+                    background: "rgba(0, 0, 0, 0.8)",
+                    color: "#fff",
+                    padding: "6px 10px",
+                    borderRadius: "6px",
+                    zIndex: 10,
+                    fontSize: "12px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    border: `2px solid ${connectionStatus.color}`
+                }}
+            >
+                <span>{connectionStatus.icon}</span>
+                <span style={{ color: connectionStatus.color }}>
+                    {connectionStatus.text}
+                </span>
+                {(connectionState === ConnectionState.ERROR || connectionState === ConnectionState.DISCONNECTED) && (
+                    <button
+                        onClick={onManualReconnect}
+                        style={{
+                            background: "#44ff44",
+                            border: "none",
+                            color: "#000",
+                            padding: "2px 6px",
+                            borderRadius: "3px",
+                            fontSize: "10px",
+                            cursor: "pointer",
+                            marginLeft: "4px"
+                        }}
+                    >
+                        🔄 Retry
+                    </button>
+                )}
+            </div>
+
             {/* 播放控制器 */}
             <div
                 style={{
@@ -448,6 +554,23 @@ export default function VideoLikePoseCanvas2D({
                     </div>
 
                     <div>Buffer: {bufferLevel}/{bufferSize}</div>
+
+                    {/* 重播按钮 */}
+                    <button
+                        onClick={handleClearBuffer}
+                        style={{
+                            background: "#4444ff",
+                            border: "none",
+                            color: "#fff",
+                            padding: "4px 8px",
+                            borderRadius: "3px",
+                            fontSize: "11px",
+                            cursor: "pointer"
+                        }}
+                        title="重新播放 - 清空缓冲区并重新获取数据"
+                    >
+                        🔄 Replay
+                    </button>
                 </div>
 
                 <div style={{display: "flex", gap: "12px", fontSize: "11px"}}>
@@ -478,9 +601,20 @@ export default function VideoLikePoseCanvas2D({
                     <div>🎬 Mode: {isPlaying ? "Playing" : "Paused"}</div>
                     <div>🎯 Track: {selectedTrackId ?? "All"}</div>
                     <div>📊 Target: {playbackFps}fps</div>
-                    <div>📐 {width}×{height}</div>
+                    <div>📐 Canvas: {width}×{height}</div>
+                    <div>🎥 Video: {videoWidth}×{videoHeight}</div>
+                    <div>📏 Scale: {(width/videoWidth).toFixed(2)}x, {(height/videoHeight).toFixed(2)}y</div>
                     <div>🔍 Available: [{availableTrackIds.join(", ")}]</div>
                     <div>Frame: {currentFrame?.frameIndex ?? "-"}</div>
+                    <div style={{ color: connectionStatus.color }}>
+                        🔗 WS: {connectionState} 
+                        {connectionState === ConnectionState.RECONNECTING && ` (${retryInfo.attempts}/${retryInfo.maxRetries})`}
+                    </div>
+                    {connectionError && (
+                        <div style={{ color: "#ff4444", fontSize: "10px" }}>
+                            Error: {connectionError}
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -491,7 +625,9 @@ export default function VideoLikePoseCanvas2D({
                 style={{
                     display: 'block',
                     imageRendering: 'auto',
-                    border: isPlaying ? '2px solid #00ff00' : '2px solid #ff4444',
+                    border: `2px solid ${connectionState === ConnectionState.CONNECTED 
+                        ? (isPlaying ? '#00ff00' : '#ff4444')
+                        : connectionStatus.color}`,
                     borderRadius: '4px',
                     cursor: 'pointer'
                 }}
