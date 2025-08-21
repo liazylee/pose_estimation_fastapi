@@ -118,6 +118,26 @@ bytetrack:
   per_class: false
   # Device configuration
   devices: "cuda:0"  # Changed to GPU for BoTSORT performance
+  # Jersey number detection configuration
+  jersey_detection:
+    enabled: true
+    # OCR model configuration
+    ocr:
+      weights_path: "jersey_ocr_best.pth"  # Path to jersey OCR model weights
+      max_workers: 2  # Maximum async OCR workers
+      roi_min_area: 400  # Minimum ROI area for OCR
+      roi_min_sharpness: 100.0  # Minimum sharpness (Laplacian variance)
+      thr_len: 0.6  # Length prediction threshold
+      thr_digit: 0.5  # Digit prediction threshold
+    # Track state management
+    tracking:
+      buffer_sec: 1.0  # Buffer duration for 1-second backfill
+      ocr_interval_frames: 15  # OCR trigger interval (frames)
+      ocr_interval_sec: 0.5  # OCR trigger interval (seconds)
+      lock_score_thr: 0.7  # Score threshold for locking jersey number
+      stale_timeout_sec: 8.0  # Timeout for stale state transition
+      review_window_sec: 1.5  # Window for reviewing best readings
+      review_hits: 2  # Required hits for confidence
   # Input configuration - multi-input for raw frames and detections
   input:
     raw_frames:

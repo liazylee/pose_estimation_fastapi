@@ -6,6 +6,7 @@ rtspAddress: :8554
 rtspTransports: [ tcp, udp ]  # Updated from deprecated 'protocols'
 apiAddress: :9997
 api: yes
+apiAllowOrigin: "*"
 # RTMP server
 rtmpAddress: :1935
 

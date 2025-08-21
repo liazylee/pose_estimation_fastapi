@@ -41,7 +41,7 @@ class ByteTrackService(BaseAIService):
     def create_input_interfaces(self) -> List:
         """Create Kafka input interfaces for raw frames and detection results."""
         from contanos.io.kafka_input_interface import KafkaInput
-        
+
         interfaces = []
         bytetrack_config = self.config.get('bytetrack', {})
         input_configs = bytetrack_config.get('input', {})
@@ -54,11 +54,11 @@ class ByteTrackService(BaseAIService):
                     config_str = input_spec.get('config', '')
                     config_str = self._substitute_task_id(config_str)
                     kafka_config = self._parse_kafka_config_string(config_str)
-                    
+
                     # Add default consumer settings
                     global_kafka = self.config.get('kafka', {})
                     consumer_settings = global_kafka.get('consumer', {})
-                    
+
                     final_config = {
                         'bootstrap_servers': kafka_config.get('bootstrap_servers'),
                         'topic': kafka_config.get('topic'),
@@ -69,9 +69,10 @@ class ByteTrackService(BaseAIService):
                         'enable_auto_commit': consumer_settings.get('enable_auto_commit', True),
                         'input_name': input_name  # Add input name for identification
                     }
-                    
+
                     interfaces.append(KafkaInput(config=final_config))
-                    logger.info(f"{input_name} input - Topic: {final_config.get('topic')}, Group: {final_config.get('group_id')}")
+                    logger.info(
+                        f"{input_name} input - Topic: {final_config.get('topic')}, Group: {final_config.get('group_id')}")
         else:
             # Legacy single input mode (backward compatibility)
             input_config = self._get_kafka_input_config()
@@ -84,7 +85,7 @@ class ByteTrackService(BaseAIService):
     def create_output_interface(self):
         """Create Kafka output interface for tracking results."""
         from contanos.io.kafka_output_interface import KafkaOutput
-        
+
         output_config = self._get_kafka_output_config()
         logger.info(f"Output topic: {output_config.get('topic')}")
 
@@ -93,22 +94,8 @@ class ByteTrackService(BaseAIService):
     def get_model_config(self) -> dict:
         """Get BoTSORT model configuration."""
         bytetrack_config = self.config.get('bytetrack', {})
-        
-        return {
-            # BoTSORT specific parameters
-            'reid_weights': bytetrack_config.get('reid_weights', 'osnet_x0_25_msmt17.pt'),
-            'half': bytetrack_config.get('half', True),
-            'track_high_thresh': bytetrack_config.get('track_high_thresh', 0.6),
-            'track_low_thresh': bytetrack_config.get('track_low_thresh', 0.1),
-            'new_track_thresh': bytetrack_config.get('new_track_thresh', 0.7),
-            'track_buffer': bytetrack_config.get('track_buffer', 30),
-            'match_thresh': bytetrack_config.get('match_thresh', 0.8),
-            'cmc_method': bytetrack_config.get('cmc_method', 'ecc'),
-            # Legacy parameters (backward compatibility)
-            'track_thresh': bytetrack_config.get('track_thresh', 0.45),
-            'frame_rate': bytetrack_config.get('frame_rate', 25),
-            'per_class': bytetrack_config.get('per_class', False)
-        }
+
+        return bytetrack_config
 
     def _parse_kafka_config_string(self, config_string: str) -> dict:
         """Parse Kafka configuration string format."""
@@ -197,7 +184,7 @@ class ByteTrackService(BaseAIService):
 def parse_args():
     """Parse command line arguments."""
     import argparse
-    
+
     parser = argparse.ArgumentParser(
         description="ByteTrack Tracking Service",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -224,8 +211,7 @@ Topic naming:
 
 async def main():
     """Main entry point."""
-    import asyncio
-    
+
     args = parse_args()
 
     try:
@@ -248,4 +234,5 @@ async def main():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(main())

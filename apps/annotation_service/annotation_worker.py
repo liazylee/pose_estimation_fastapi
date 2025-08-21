@@ -67,8 +67,9 @@ class AnnotationWorker(BaseWorker):
             frame_bytes = inputs.get('image_bytes')
             # detections = inputs.get('detections', [])
             poses = inputs.get('pose_estimations', [])  # Support both field names
-            tracked_poses = inputs.get('tracked_poses', [])
+            # tracked_poses = inputs.get('tracked_poses', [])
             tracked_poses_results = inputs.get('tracked_poses_results', [])
+
             frame_id = inputs.get('frame_id', 0)
             if frame_bytes is None:
                 logging.error(f"Worker {self.worker_id}: Invalid frame input")
@@ -84,7 +85,7 @@ class AnnotationWorker(BaseWorker):
                     obj['bbox'][2],
                     obj['bbox'][3]
                 )
-                for obj in tracked_poses
+                for obj in tracked_poses_results
             }
             self.trajectory_drawer.update_trajectories(points, frame_id)
             # Use FrameAnnotator to draw all annotations
@@ -92,7 +93,7 @@ class AnnotationWorker(BaseWorker):
 
             annotated_frame = self.frame_annotator.annotate_frame(
                 frame=frame,
-                tracked_objects=tracked_poses,
+                tracked_objects=tracked_poses_results,
                 poses=poses,
 
             )

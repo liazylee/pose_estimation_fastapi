@@ -34,6 +34,7 @@ return {
             }
 
 """
+import logging
 from typing import Tuple
 
 import cv2 as cv  # type: ignore
@@ -55,7 +56,7 @@ def get_track_color(track_id: int) -> Tuple[int, int, int]:
 
 
 def draw_boxes_on_frame(frame: np.ndarray,
-                        detections: list,
+                        tracked_objects: list,
                         scale: float = 1.0,
                         draw_labels: bool = True) -> np.ndarray:
     """
@@ -63,7 +64,7 @@ def draw_boxes_on_frame(frame: np.ndarray,
 
     Args:
         frame (np.ndarray): The image frame to draw on.
-        detections (list): List of detection dictionaries with 'bbox', 'track_id', 'score', and 'class_id'.
+        tracked_objects (list): List of detection dictionaries with 'bbox', 'track_id', 'score', and 'class_id'.
         scale (float): Scale factor for the bounding box coordinates.
         draw_labels (bool): Whether to draw labels on the boxes.
 
@@ -72,18 +73,21 @@ def draw_boxes_on_frame(frame: np.ndarray,
     """
     if not isinstance(frame, np.ndarray):
         raise ValueError("Frame must be a numpy array")
-    s_track_id = 1
+
     # detections=['bbox': [x1, y1, x2, y2], 'track_id': track_id, ]
 
-    for detection in detections:
+    for detection in tracked_objects:
         bbox = detection.get('bbox', [])
+        jersey_number = detection.get('jersey_number', None)
+        if jersey_number.isdigit():
+            # If jersey number is present, use it as track_id
+            track_id = jersey_number
+            logging.info(f"Jersey number: {jersey_number}")
+        else:
+            track_id = detection.get('track_id', None)
         if len(bbox) < 4:
             continue
         x1, y1, x2, y2 = [int(coord * scale) for coord in bbox[:4]]
-        track_id = detection.get('track_id', None)
-        if not track_id:
-            track_id = s_track_id
-            s_track_id += 1
         # draw the bounding box
         cv.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
         color = get_track_color(track_id)

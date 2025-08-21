@@ -14,6 +14,7 @@ import numpy as np
 
 from contanos import deserialize_image_from_kafka
 from .helper import _parse_ts
+from .jersey_enricher_simple import SimpleJerseyEnricher
 
 # Add parent directories to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../")))
@@ -53,6 +54,10 @@ class ByteTrackWorker(BaseWorker):
         self._last_state = {}
         self._track_history = {}  # {track_id: deque([(ts, cx, cy, h), ...])}
         self._speed_smoothed = {}  # {track_id: smoothed_speed_mps}
+
+        # Initialize jersey enricher
+        self.jersey_enricher = SimpleJerseyEnricher(self.model_config)
+
         logging.info(f"BoTSORT Worker {worker_id} initializing on device {device}")
         self._model_init()
 
@@ -144,12 +149,24 @@ class ByteTrackWorker(BaseWorker):
             else:
                 logging.error(f"Unknown tracker type: {self.tracker_type}")
                 return self._empty_result(task_id, frame_id, timestamp)
+
             self._attach_speed(tracks, timestamp)
+            # change timestamp to float if it's a string
+
+            # Enrich tracks with jersey numbers
+            enriched_tracks = self.jersey_enricher.enrich_tracks(
+                frame=frame,
+                frame_id=frame_id,
+                timestamp=timestamp,  # Let enricher handle timestamp parsing
+                tracks=tracks,
+                task_id=task_id
+            )
+            # logging.info(f'enriched_tracks: {enriched_tracks}')
             return {
                 "task_id": task_id,
                 "frame_id": frame_id,
                 "timestamp": timestamp,
-                "tracked_poses": tracks
+                "tracked_poses": enriched_tracks
             }
 
         except Exception as e:
@@ -272,3 +289,11 @@ class ByteTrackWorker(BaseWorker):
             'timestamp': timestamp,
             'tracked_poses': []
         }
+
+    def __del__(self):
+        """Cleanup jersey enricher on worker destruction."""
+        if hasattr(self, 'jersey_enricher'):
+            try:
+                self.jersey_enricher.shutdown()
+            except Exception as e:
+                logging.error(f"Error shutting down jersey enricher: {e}")
