@@ -180,7 +180,7 @@ annotation:
   video_output:
     enabled: true
     output_dir: "output_videos"
-    filename_template: "annotated_{task_id}_{timestamp}.mp4"
+    filename_template: "annotated_{task_id}.mp4"
     # Video encoding parameters
     width: 1920
     height: 1080

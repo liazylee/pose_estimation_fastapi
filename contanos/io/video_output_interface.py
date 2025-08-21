@@ -1,5 +1,4 @@
 import asyncio
-import datetime
 import logging
 import os
 from abc import ABC
@@ -17,7 +16,7 @@ class VideoOutput(ABC):
         self.task_id = config.get("task_id", "unknown")
         self.output_dir = config.get("output_dir", "output_videos")
         self.filename_template = config.get(
-            "filename_template", "annotated_{task_id}_{timestamp}.mp4"
+            "filename_template", "annotated_{task_id}.mp4"
         )
         self.width: int = int(config.get("width", 1920))
         self.height: int = int(config.get("height", 1080))
@@ -35,12 +34,9 @@ class VideoOutput(ABC):
 
         try:
 
-            full_output_dir = os.path.join(self.output_dir, self.task_id)
-            os.makedirs(full_output_dir, exist_ok=True)
-
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = self.filename_template.format(task_id=self.task_id, timestamp=timestamp)
-            self.output_path = os.path.join(full_output_dir, filename)
+            os.makedirs(self.output_dir, exist_ok=True)
+            filename = self.filename_template.format(task_id=self.task_id)
+            self.output_path = os.path.join(self.output_dir, filename)
 
             logging.info(f"Starting OpenCV video output to {self.output_path}")
             logging.info(f"Video params: {self.width}x{self.height} @ {self.fps}fps")
