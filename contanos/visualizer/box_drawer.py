@@ -52,6 +52,7 @@ TRACK_COLORS = [
 
 def get_track_color(track_id: int) -> Tuple[int, int, int]:
     """Get color for a specific track ID."""
+
     return TRACK_COLORS[track_id % len(TRACK_COLORS)]
 
 
@@ -75,27 +76,30 @@ def draw_boxes_on_frame(frame: np.ndarray,
         raise ValueError("Frame must be a numpy array")
 
     # detections=['bbox': [x1, y1, x2, y2], 'track_id': track_id, ]
+    try:
+        for detection in tracked_objects:
+            bbox = detection.get('bbox', [])
+            jersey_number = detection.get('jersey_number', '')
+            if jersey_number.isdigit():
+                # If jersey number is present, use it as track_id
+                track_id = jersey_number
+            else:
+                track_id = detection.get('track_id', 0)
+            track_id = int(track_id) if isinstance(track_id, str) and track_id.isdigit() else track_id
+            if len(bbox) < 4:
+                continue
+            x1, y1, x2, y2 = [int(coord * scale) for coord in bbox[:4]]
+            # draw the bounding box
+            cv.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
+            color = get_track_color(track_id)
+            speed_kmh = detection.get('speed_kmh', None)
+            if speed_kmh is not None:
+                label = f"ID: {track_id} {speed_kmh:.1f} km/h"
+            else:
+                label = f"ID: {track_id}"
+            cv.putText(frame, label, (x1, y1 - 5), cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
 
-    for detection in tracked_objects:
-        bbox = detection.get('bbox', [])
-        jersey_number = detection.get('jersey_number', None)
-        if jersey_number.isdigit():
-            # If jersey number is present, use it as track_id
-            track_id = jersey_number
-            logging.info(f"Jersey number: {jersey_number}")
-        else:
-            track_id = detection.get('track_id', None)
-        if len(bbox) < 4:
-            continue
-        x1, y1, x2, y2 = [int(coord * scale) for coord in bbox[:4]]
-        # draw the bounding box
-        cv.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
-        color = get_track_color(track_id)
-        speed_kmh = detection.get('speed_kmh', None)
-        if speed_kmh is not None:
-            label = f"ID: {track_id} {speed_kmh:.1f} km/h"
-        else:
-            label = f"ID: {track_id}"
-        cv.putText(frame, label, (x1, y1 - 5), cv.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-
-    return frame
+        return frame
+    except Exception as e:
+        logging.error("Error drawing boxes", exc_info=True)
+        return frame
