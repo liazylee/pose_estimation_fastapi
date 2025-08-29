@@ -33,7 +33,7 @@ class SimpleTrackState:
         self.jersey_score = 0.0
         self.last_ocr_time = 0.0
         self.last_ocr_frame = 0
-        self.ocr_interval_frames = config.get('ocr_interval_frames', 15)
+        self.ocr_interval_frames = config.get('ocr_interval_frames', 25)
         self.ocr_interval_sec = config.get('ocr_interval_sec', 0.5)
         self.lock_score_thr = config.get('lock_score_thr', 0.7)
         self.stale_timeout_sec = config.get('stale_timeout_sec', 8.0)

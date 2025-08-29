@@ -1,12 +1,22 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Button, Group, Stack, Text, Badge, Switch } from '@mantine/core';
+import { getDisplayId, getDisplayIdColor, extractDisplayIds, PersonData } from '../utils/displayId';
 
 interface SpeedDataPoint {
     frameIndex: number;
     timestamp: number;
     timeInSeconds: number; // 相对开始时间的秒数
-    [key: string]: number; // trackId_speed format: "track_1": 15.2
+    [key: string]: number; // displayId_speed format: "jersey_10": 15.2 or "track_1": 15.2
+}
+
+interface DisplayIdInfo {
+    id: string;
+    displayValue: number;
+    label: string;
+    type: 'jersey' | 'track';
+    confidence: number;
+    fallbackTrackId: number;
 }
 
 // WebSocket 连接状态 (从父组件传入)
@@ -24,15 +34,28 @@ interface SpeedChartProps {
     connectionError: string;
     retryInfo: { attempts: number; maxRetries: number };
     onManualReconnect: () => void;
-    selectedTrackId?: number | null;
-    onTrackIdChange?: (trackId: number | null) => void;
+    selectedDisplayId?: string | null; // Changed from selectedTrackId to selectedDisplayId
+    onDisplayIdChange?: (displayId: string | null) => void; // Changed from onTrackIdChange
     showAllTracks?: boolean;
     onShowAllTracksChange?: (showAll: boolean) => void;
     maxDataPoints?: number;
     height?: number;
+    jerseyConfidenceThreshold?: number;
 }
 
-const TRACK_COLORS = ["#8884d8", "#82ca9d", "#ffc658", "#ff7300", "#00ff00", "#0088fe", "#ff0080"];
+// Sports-themed color scheme with better contrast
+const DISPLAY_COLORS = [
+    "#00C853", // Sports green
+    "#FF6F00", // Orange
+    "#2196F3", // Blue  
+    "#E91E63", // Pink
+    "#9C27B0", // Purple
+    "#FF9800", // Amber
+    "#00BCD4", // Cyan
+    "#4CAF50", // Green
+    "#F44336", // Red
+    "#FF5722"  // Deep Orange
+];
 
 export default function SpeedChart({
     frameData,
@@ -40,15 +63,16 @@ export default function SpeedChart({
     connectionError,
     retryInfo,
     onManualReconnect,
-    selectedTrackId = null,
-    onTrackIdChange,
+    selectedDisplayId = null,
+    onDisplayIdChange,
     showAllTracks = false,
     onShowAllTracksChange,
     maxDataPoints = 100,
-    height = 300
+    height = 300,
+    jerseyConfidenceThreshold = 0.7
 }: SpeedChartProps) {
     const [speedData, setSpeedData] = useState<SpeedDataPoint[]>([]);
-    const [availableTrackIds, setAvailableTrackIds] = useState<number[]>([]);
+    const [availableDisplayIds, setAvailableDisplayIds] = useState<DisplayIdInfo[]>([]);
     const [startTime, setStartTime] = useState<number | null>(null);
     const [maxTimeRange, setMaxTimeRange] = useState<number>(30); // 初始30秒窗口
 
@@ -58,7 +82,7 @@ export default function SpeedChart({
             setSpeedData([]);
             setStartTime(null);
             setMaxTimeRange(30);
-            setAvailableTrackIds([]);
+            setAvailableDisplayIds([]);
             return;
         }
     }, [frameData]);
@@ -82,53 +106,55 @@ export default function SpeedChart({
         // 计算相对时间（秒）
         const timeInSeconds = startTime !== null ? (currentTimestamp - startTime) / 1000 : 0;
 
-        // 提取速度数据
+        // 提取速度数据 - using display IDs
         const speedPoint: SpeedDataPoint = {
             frameIndex,
             timestamp: currentTimestamp,
             timeInSeconds
         };
 
-        const currentTrackIds: number[] = [];
+        const currentDisplayIds: DisplayIdInfo[] = [];
         
-        persons.forEach((person: any) => {
-            const trackId = person.track_id ?? 0;
+        persons.forEach((person: PersonData) => {
+            const displayIdInfo = getDisplayId(person, jerseyConfidenceThreshold);
             let speed = typeof person.speed_kmh === "number" ? person.speed_kmh : 0;
             
-            if (trackId > 0) {
-                currentTrackIds.push(trackId);
+            // Only process persons with valid track IDs
+            if (displayIdInfo.fallbackTrackId > 0) {
+                currentDisplayIds.push(displayIdInfo);
                 
                 // 获取之前的速度值进行平滑处理
                 const prevData = speedData[speedData.length - 1];
-                if (prevData && prevData[`track_${trackId}`] !== undefined) {
-                    const prevSpeed = prevData[`track_${trackId}`];
+                if (prevData && prevData[displayIdInfo.id] !== undefined) {
+                    const prevSpeed = prevData[displayIdInfo.id];
                     // 使用简单的移动平均进行平滑，权重70%新值，30%旧值
                     speed = speed * 0.7 + prevSpeed * 0.3;
                 }
                 
-                speedPoint[`track_${trackId}`] = Number(speed.toFixed(2));
+                speedPoint[displayIdInfo.id] = Number(speed.toFixed(2));
             }
         });
 
-        // 更新可用track IDs
-        if (JSON.stringify(currentTrackIds) !== JSON.stringify(availableTrackIds)) {
-            setAvailableTrackIds(currentTrackIds);
+        // 更新可用display IDs
+        const displayIdStrings = currentDisplayIds.map(d => d.id).sort();
+        const currentIdStrings = availableDisplayIds.map(d => d.id).sort();
+        if (JSON.stringify(displayIdStrings) !== JSON.stringify(currentIdStrings)) {
+            setAvailableDisplayIds(currentDisplayIds);
         }
 
         setSpeedData(prev => {
-            // For better line continuity, ensure all previous track IDs have values in the new point
-            // Fill missing track IDs with null or last known value
-            const allTrackIds = new Set([...availableTrackIds, ...currentTrackIds]);
-            allTrackIds.forEach(trackId => {
-                const key = `track_${trackId}`;
-                if (speedPoint[key] === undefined) {
-                    // Try to use the last known value for this track to maintain continuity
+            // For better line continuity, ensure all previous display IDs have values in the new point
+            // Fill missing display IDs with null or last known value
+            const allDisplayIds = new Set([...availableDisplayIds.map(d => d.id), ...currentDisplayIds.map(d => d.id)]);
+            allDisplayIds.forEach(displayId => {
+                if (speedPoint[displayId] === undefined) {
+                    // Try to use the last known value for this display ID to maintain continuity
                     const lastPoint = prev[prev.length - 1];
-                    if (lastPoint && lastPoint[key] !== undefined) {
+                    if (lastPoint && lastPoint[displayId] !== undefined) {
                         // Use a slightly decayed value to gradually reduce speed when track is lost
-                        speedPoint[key] = Math.max(0, lastPoint[key] * 0.9);
+                        speedPoint[displayId] = Math.max(0, lastPoint[displayId] * 0.9);
                     } else {
-                        speedPoint[key] = 0;
+                        speedPoint[displayId] = 0;
                     }
                 }
             });
@@ -153,7 +179,7 @@ export default function SpeedChart({
             
             return filteredData;
         });
-    }, [frameData, availableTrackIds, maxDataPoints, startTime, maxTimeRange]);
+    }, [frameData, availableDisplayIds, maxDataPoints, startTime, maxTimeRange, jerseyConfidenceThreshold]);
 
     // 清空数据的处理函数
     const handleClearData = useCallback(() => {
@@ -163,23 +189,29 @@ export default function SpeedChart({
         onManualReconnect();
     }, [onManualReconnect]);
 
-    // 获取要显示的线条
+    // 获取要显示的线条 - using display IDs
     const getDisplayLines = () => {
         if (showAllTracks) {
-            return availableTrackIds.map(trackId => ({
-                key: `track_${trackId}`,
-                name: `Track ${trackId}`,
-                color: TRACK_COLORS[trackId % TRACK_COLORS.length]
+            return availableDisplayIds.map(displayIdInfo => ({
+                key: displayIdInfo.id,
+                name: displayIdInfo.label,
+                color: getDisplayIdColor(displayIdInfo.id, DISPLAY_COLORS),
+                type: displayIdInfo.type,
+                confidence: displayIdInfo.confidence
             }));
-        } else if (selectedTrackId !== null) {
-            return [{
-                key: `track_${selectedTrackId}`,
-                name: `Track ${selectedTrackId}`,
-                color: TRACK_COLORS[selectedTrackId % TRACK_COLORS.length]
-            }];
-        } else {
-            return [];
+        } else if (selectedDisplayId !== null) {
+            const selectedInfo = availableDisplayIds.find(d => d.id === selectedDisplayId);
+            if (selectedInfo) {
+                return [{
+                    key: selectedInfo.id,
+                    name: selectedInfo.label,
+                    color: getDisplayIdColor(selectedInfo.id, DISPLAY_COLORS),
+                    type: selectedInfo.type,
+                    confidence: selectedInfo.confidence
+                }];
+            }
         }
+        return [];
     };
 
     const displayLines = getDisplayLines();
@@ -279,19 +311,22 @@ export default function SpeedChart({
                         onChange={(e) => onShowAllTracksChange?.(e.currentTarget.checked)}
                     />
                     
-                    {!showAllTracks && availableTrackIds.length > 0 && (
+                    {!showAllTracks && availableDisplayIds.length > 0 && (
                         <select
-                            value={selectedTrackId || ''}
-                            onChange={(e) => onTrackIdChange?.(e.target.value ? Number(e.target.value) : null)}
+                            value={selectedDisplayId || ''}
+                            onChange={(e) => onDisplayIdChange?.(e.target.value || null)}
                             style={{
                                 padding: '4px 8px',
                                 borderRadius: '4px',
                                 border: '1px solid #ccc'
                             }}
                         >
-                            <option value="">Select Track</option>
-                            {availableTrackIds.map(id => (
-                                <option key={id} value={id}>Track {id}</option>
+                            <option value="">Select Player</option>
+                            {availableDisplayIds.map(displayIdInfo => (
+                                <option key={displayIdInfo.id} value={displayIdInfo.id}>
+                                    {displayIdInfo.label}
+                                    {displayIdInfo.type === 'jersey' && ` (${Math.round(displayIdInfo.confidence * 100)}%)`}
+                                </option>
                             ))}
                         </select>
                     )}
@@ -363,10 +398,14 @@ export default function SpeedChart({
                     Time window: {maxTimeRange.toFixed(0)}s
                 </Text>
                 <Text size="sm" c="dimmed">
-                    Available tracks: {availableTrackIds.length > 0 ? availableTrackIds.join(', ') : 'None'}
+                    Available players: {availableDisplayIds.length > 0 ? 
+                        availableDisplayIds.map(d => d.type === 'jersey' ? `#${d.displayValue}` : `T${d.displayValue}`).join(', ') 
+                        : 'None'}
                 </Text>
                 <Text size="sm" c="dimmed">
-                    Mode: {showAllTracks ? 'All Tracks' : selectedTrackId ? `Track ${selectedTrackId}` : 'None selected'}
+                    Mode: {showAllTracks ? 'All Players' : selectedDisplayId ? 
+                        availableDisplayIds.find(d => d.id === selectedDisplayId)?.label || 'Unknown'
+                        : 'None selected'}
                 </Text>
             </Group>
         </Stack>

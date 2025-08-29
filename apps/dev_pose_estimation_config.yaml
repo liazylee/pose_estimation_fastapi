@@ -104,13 +104,13 @@ rtmpose:
 bytetrack:
   enabled: true
   # BoTSORT specific parameters
-  reid_weights: "osnet_x0_25_msmt17.pt"  # ReID model weights path
-  half: true  # Use half precision
-  track_high_thresh: 0.3  # Lowered from 0.6 for better detection
+  reid_weights: "osnet_x1_0_msmt17.pth"  # ReID model weights path
+  half: false  # Use half precision
+  track_high_thresh: 0.7  # Lowered from 0.6 for better detection
   track_low_thresh: 0.1
-  new_track_thresh: 0.4  # Lowered from 0.7 for easier track creation
-  track_buffer: 30
-  match_thresh: 0.8
+  new_track_thresh: 0.7  # Lowered from 0.7 for easier track creation
+  track_buffer: 60
+  match_thresh: 0.75
   cmc_method: "ecc"  # Camera motion compensation method
   # Legacy ByteTrack parameters (for backward compatibility)
   track_thresh: 0.45
@@ -132,11 +132,11 @@ bytetrack:
     # Track state management
     tracking:
       buffer_sec: 1.0  # Buffer duration for 1-second backfill
-      ocr_interval_frames: 15  # OCR trigger interval (frames)
-      ocr_interval_sec: 0.5  # OCR trigger interval (seconds)
-      lock_score_thr: 0.7  # Score threshold for locking jersey number
+      ocr_interval_frames: 25  # OCR trigger interval (frames)
+      ocr_interval_sec: 1  # OCR trigger interval (seconds)
+      lock_score_thr: 0.8  # Score threshold for locking jersey number
       stale_timeout_sec: 8.0  # Timeout for stale state transition
-      review_window_sec: 1.5  # Window for reviewing best readings
+      review_window_sec: 2  # Window for reviewing best readings
       review_hits: 2  # Required hits for confidence
   # Input configuration - multi-input for raw frames and detections
   input:
@@ -184,9 +184,9 @@ annotation:
     - type: "rtsp"
       config: "rtsp://localhost:8554,topic=outstream_{task_id},width=1280,height=720,fps=25"
       fps: 25  # 注意：应该与输入视频fps匹配以避免时长变化
-      bitrate: "4000k"
-      width: 1280
-      height: 720
+      bitrate: "9000k"
+      width: 1920
+      height: 1080
       preset: "veryfast"
       codec: "libx264"
       pixel_format: "yuv420p"

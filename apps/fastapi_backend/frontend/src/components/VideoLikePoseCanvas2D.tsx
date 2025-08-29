@@ -1,5 +1,15 @@
 // VideoLikePoseCanvas2D.tsx - 模拟视频播放效果
 import React, {useCallback, useEffect, useRef, useState} from "react";
+import { getDisplayId, getDisplayIdColor, extractDisplayIds, PersonData } from '../utils/displayId';
+
+interface DisplayIdInfo {
+    id: string;
+    displayValue: number;
+    label: string;
+    type: 'jersey' | 'track';
+    confidence: number;
+    fallbackTrackId: number;
+}
 
 type PoseCanvasProps = {
     frameData: any; // WebSocket数据从父组件传入
@@ -11,7 +21,7 @@ type PoseCanvasProps = {
     height: number;
     videoWidth?: number;  // 视频真实宽度
     videoHeight?: number; // 视频真实高度
-    selectedTrackId?: number | null;
+    selectedDisplayId?: string | null; // Changed from selectedTrackId
     showSkeleton?: boolean;
     showJoints?: boolean;
     showBBoxes?: boolean;
@@ -19,7 +29,8 @@ type PoseCanvasProps = {
     showDebug?: boolean;
     targetFps?: number; // 目标播放帧率，默认25fps
     bufferSize?: number; // 缓冲区大小，默认50帧
-    onTrackIdsUpdate?: (trackIds: number[]) => void;
+    onDisplayIdsUpdate?: (displayIds: DisplayIdInfo[]) => void; // Changed from onTrackIdsUpdate
+    jerseyConfidenceThreshold?: number;
 };
 
 // WebSocket 连接状态
@@ -146,8 +157,19 @@ const JOINT_PART: Record<number, string> = (() => {
     return m;
 })();
 
-const TRACK_COLORS = ["#00ffff", "#ff00ff", "#ffff00", "#800080", "#ffa500", "#0080ff"];
-const getTrackColor = (id: number) => TRACK_COLORS[Math.abs(id) % TRACK_COLORS.length];
+// Sports-themed color scheme with better contrast
+const DISPLAY_COLORS = [
+    "#00C853", // Sports green
+    "#FF6F00", // Orange
+    "#2196F3", // Blue  
+    "#E91E63", // Pink
+    "#9C27B0", // Purple
+    "#FF9800", // Amber
+    "#00BCD4", // Cyan
+    "#4CAF50", // Green
+    "#F44336", // Red
+    "#FF5722"  // Deep Orange
+];
 
 export default function VideoLikePoseCanvas2D({
                                                   frameData,
@@ -159,7 +181,7 @@ export default function VideoLikePoseCanvas2D({
                                                   height,
                                                   videoWidth = width,
                                                   videoHeight = height,
-                                                  selectedTrackId = null,
+                                                  selectedDisplayId = null,
                                                   showSkeleton = true,
                                                   showJoints = true,
                                                   showBBoxes = true,
@@ -167,7 +189,8 @@ export default function VideoLikePoseCanvas2D({
                                                   showDebug = false,
                                                   targetFps = 25, // 默认25fps播放
                                                   bufferSize = 50,
-                                                  onTrackIdsUpdate
+                                                  onDisplayIdsUpdate,
+                                                  jerseyConfidenceThreshold = 0.7
                                               }: PoseCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const animationRef = useRef<number | null>(null);
@@ -180,7 +203,7 @@ export default function VideoLikePoseCanvas2D({
     const [bufferLevel, setBufferLevel] = useState(0);
     const [playbackFps, setPlaybackFps] = useState(targetFps);
     const [currentFrame, setCurrentFrame] = useState<FrameData | null>(null);
-    const [availableTrackIds, setAvailableTrackIds] = useState<number[]>([]);
+    const [availableDisplayIds, setAvailableDisplayIds] = useState<DisplayIdInfo[]>([]);
 
     // 统计信息
     const [stats, setStats] = useState({
@@ -213,33 +236,37 @@ export default function VideoLikePoseCanvas2D({
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, width, height);
 
-        // 筛选要绘制的人员
+        // 筛选要绘制的人员 - using display IDs
         let targetPersons = frameData.persons;
-        if (selectedTrackId !== null) {
-            targetPersons = frameData.persons.filter(p => {
-                const trackId = p.track_id ?? 0;
-                return trackId === selectedTrackId;
+        if (selectedDisplayId !== null) {
+            targetPersons = frameData.persons.filter((p: PersonData) => {
+                const displayIdInfo = getDisplayId(p, jerseyConfidenceThreshold);
+                return displayIdInfo.id === selectedDisplayId;
             });
         }
 
-        // 收集可用Track IDs
-        const currentTrackIds = frameData.persons
-            .map(p => p.track_id ?? 0)
-            .filter(id => id > 0);
-
-        if (JSON.stringify(currentTrackIds) !== JSON.stringify(availableTrackIds)) {
-            setAvailableTrackIds(currentTrackIds);
-            onTrackIdsUpdate?.(currentTrackIds);
+        // 收集可用Display IDs
+        const currentDisplayIds = extractDisplayIds(frameData.persons, jerseyConfidenceThreshold);
+        const displayIdStrings = currentDisplayIds.map(d => d.id).sort();
+        const currentIdStrings = availableDisplayIds.map(d => d.id).sort();
+        
+        if (JSON.stringify(displayIdStrings) !== JSON.stringify(currentIdStrings)) {
+            setAvailableDisplayIds(currentDisplayIds);
+            onDisplayIdsUpdate?.(currentDisplayIds);
         }
 
-        // 绘制每个人
-        targetPersons.forEach((person, index) => {
-            const trackId = person.track_id ?? index + 1;
-            const joints: [number, number][] = person.pose || [];
+        // 绘制每个人 - using display IDs
+        targetPersons.forEach((person: PersonData) => {
+            const displayIdInfo = getDisplayId(person, jerseyConfidenceThreshold);
+            const joints: [number, number][] = (person.pose || []).map(joint => 
+                Array.isArray(joint) && joint.length >= 2 ? [joint[0], joint[1]] as [number, number] : [0, 0]
+            );
             const bbox = person.bbox;
             const speed = typeof person.speed_kmh === "number" ? `${person.speed_kmh.toFixed(1)}km/h` : "";
+            const jerseyInfo = displayIdInfo.type === 'jersey' ? 
+                ` (${Math.round(displayIdInfo.confidence * 100)}%)` : "";
 
-            const color = limbColorMode === "python" ? undefined : getTrackColor(trackId);
+            const color = limbColorMode === "python" ? undefined : getDisplayIdColor(displayIdInfo.id, DISPLAY_COLORS);
 
             // 设置绘制属性
             ctx.lineCap = 'round';
@@ -297,18 +324,20 @@ export default function VideoLikePoseCanvas2D({
                 ctx.strokeRect(Math.round(tx1), Math.round(ty1), Math.round(tx2 - tx1), Math.round(ty2 - ty1));
                 ctx.setLineDash([]);
 
-                // 标签
-                const text = `Track ${trackId}${speed ? " • " + speed : ""}`;
-                ctx.font = "14px sans-serif";
+                // 标签 - enhanced with jersey info
+                const text = `${displayIdInfo.label}${jerseyInfo}${speed ? " • " + speed : ""}`;
+                ctx.font = displayIdInfo.type === 'jersey' ? "bold 14px sans-serif" : "14px sans-serif";
                 const textWidth = ctx.measureText(text).width;
                 const padding = 8;
 
-                ctx.fillStyle = color || "#ffffff";
-                ctx.globalAlpha = 0.8;
+                // Different background for jersey vs track
+                ctx.fillStyle = displayIdInfo.type === 'jersey' ? 
+                    (color || "#00C853") : (color || "#ffffff");
+                ctx.globalAlpha = displayIdInfo.type === 'jersey' ? 0.9 : 0.8;
                 ctx.fillRect(tx1, Math.max(0, ty1 - 30), textWidth + padding * 2, 24);
 
                 ctx.globalAlpha = 1;
-                ctx.fillStyle = "#000000";
+                ctx.fillStyle = displayIdInfo.type === 'jersey' ? "#ffffff" : "#000000";
                 ctx.fillText(text, tx1 + padding, Math.max(18, ty1 - 10));
             }
         });
@@ -324,7 +353,7 @@ export default function VideoLikePoseCanvas2D({
             counter.lastTime = now;
         }
 
-    }, [width, height, videoWidth, videoHeight, selectedTrackId, showSkeleton, showJoints, showBBoxes, limbColorMode, availableTrackIds, onTrackIdsUpdate, transformCoordinate]);
+    }, [width, height, videoWidth, videoHeight, selectedDisplayId, showSkeleton, showJoints, showBBoxes, limbColorMode, availableDisplayIds, onDisplayIdsUpdate, transformCoordinate, jerseyConfidenceThreshold]);
 
     // 播放循环
     const playLoop = useCallback(() => {
@@ -577,7 +606,9 @@ export default function VideoLikePoseCanvas2D({
                     <span>📡 {stats.receivedFrames}</span>
                     <span>▶ {stats.playedFrames}</span>
                     <span>⚡ {stats.realFps}fps</span>
-                    {selectedTrackId && <span>🎯 Track {selectedTrackId}</span>}
+                    {selectedDisplayId && (
+                        <span>🎯 {availableDisplayIds.find(d => d.id === selectedDisplayId)?.label || 'Unknown'}</span>
+                    )}
                 </div>
             </div>
 
@@ -599,12 +630,16 @@ export default function VideoLikePoseCanvas2D({
                     }}
                 >
                     <div>🎬 Mode: {isPlaying ? "Playing" : "Paused"}</div>
-                    <div>🎯 Track: {selectedTrackId ?? "All"}</div>
+                    <div>🎯 Player: {selectedDisplayId ? 
+                        (availableDisplayIds.find(d => d.id === selectedDisplayId)?.label || 'Unknown') 
+                        : "All"}</div>
                     <div>📊 Target: {playbackFps}fps</div>
                     <div>📐 Canvas: {width}×{height}</div>
                     <div>🎥 Video: {videoWidth}×{videoHeight}</div>
                     <div>📏 Scale: {(width/videoWidth).toFixed(2)}x, {(height/videoHeight).toFixed(2)}y</div>
-                    <div>🔍 Available: [{availableTrackIds.join(", ")}]</div>
+                    <div>🔍 Available: [{availableDisplayIds.map(d => 
+                        d.type === 'jersey' ? `#${d.displayValue}` : `T${d.displayValue}`
+                    ).join(", ")}]</div>
                     <div>Frame: {currentFrame?.frameIndex ?? "-"}</div>
                     <div style={{ color: connectionStatus.color }}>
                         🔗 WS: {connectionState} 

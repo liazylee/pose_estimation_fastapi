@@ -1,19 +1,6 @@
 # Kafka Topic Lifecycle Management
 # Handles dynamic creation and deletion of task-specific Kafka topics
 
-# TODO: Implement the following functions:
-# - create_kafka_topics(task_id): Create all required topics for a task
-# - delete_kafka_topics(task_id): Clean up topics after task completion
-# - get_kafka_admin_client(): Get configured Kafka admin client
-# - validate_topics_exist(task_id): Check if topics are properly created
-
-# Topics to manage per task:
-# - raw_frames_{task_id}
-# - yolox_{task_id} 
-# - rtmpose_{task_id}
-# - bytetrack_{task_id}
-
-# TODO: Configure topic settings (retention, partitions, etc.) 
 """
 Kafka controller for managing topics and messaging.
 """

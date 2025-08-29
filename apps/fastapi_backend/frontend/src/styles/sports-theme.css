@@ -1,0 +1,165 @@
+/* Sports-themed UI enhancements */
+
+:root {
+  /* Sports color palette */
+  --sports-primary: #00C853;    /* Sports green */
+  --sports-secondary: #FF6F00;  /* Orange */
+  --sports-accent: #2196F3;     /* Blue */
+  --sports-warning: #FF8F00;    /* Amber */
+  --sports-error: #D32F2F;      /* Red */
+  
+  /* Jersey-specific colors */
+  --jersey-gold: #FFD700;
+  --jersey-silver: #C0C0C0;
+  --jersey-bronze: #CD7F32;
+  
+  /* Performance indicators */
+  --performance-excellent: #4CAF50;
+  --performance-good: #8BC34A;
+  --performance-average: #FFC107;
+  --performance-poor: #FF5722;
+}
+
+/* Enhanced cards with sports styling */
+.sports-dashboard-card {
+  border: 2px solid var(--sports-primary);
+  border-radius: 12px;
+  background: linear-gradient(135deg, rgba(0, 200, 83, 0.05) 0%, rgba(255, 111, 0, 0.05) 100%);
+  transition: all 0.3s ease;
+}
+
+.sports-dashboard-card:hover {
+  box-shadow: 0 8px 25px rgba(0, 200, 83, 0.2);
+  transform: translateY(-2px);
+}
+
+/* Jersey number badges */
+.jersey-badge {
+  background: linear-gradient(135deg, var(--jersey-gold) 0%, var(--sports-primary) 100%);
+  color: #000;
+  font-weight: bold;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+  animation: pulse-glow 2s infinite;
+}
+
+.track-badge {
+  background: linear-gradient(135deg, var(--sports-accent) 0%, var(--sports-secondary) 100%);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2); }
+  50% { box-shadow: 0 4px 8px rgba(255, 215, 0, 0.4); }
+}
+
+/* Status indicators */
+.connection-status {
+  position: relative;
+  overflow: hidden;
+}
+
+.connection-status::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  animation: connection-sweep 3s infinite;
+}
+
+@keyframes connection-sweep {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+/* Performance metrics */
+.performance-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--performance-poor) 0%, var(--performance-average) 50%, var(--performance-excellent) 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+.performance-indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.8);
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+/* Speed chart enhancements */
+.speed-chart-container {
+  background: radial-gradient(circle at center, rgba(0, 200, 83, 0.05) 0%, rgba(33, 150, 243, 0.05) 100%);
+  border-radius: 12px;
+  padding: 16px;
+  border: 1px solid rgba(0, 200, 83, 0.2);
+}
+
+/* Real-time data indicators */
+.live-indicator {
+  animation: live-pulse 1.5s infinite;
+  color: var(--sports-error);
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Player selection enhancements */
+.player-selector {
+  background: rgba(0, 200, 83, 0.1);
+  border-radius: 8px;
+  padding: 12px;
+  border: 1px solid rgba(0, 200, 83, 0.3);
+}
+
+/* Enhanced buttons */
+.sports-button-primary {
+  background: linear-gradient(135deg, var(--sports-primary) 0%, var(--sports-accent) 100%);
+  border: none;
+  color: white;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  transition: all 0.3s ease;
+}
+
+.sports-button-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 200, 83, 0.4);
+}
+
+/* Jersey confidence indicators */
+.confidence-high { color: var(--performance-excellent); }
+.confidence-medium { color: var(--performance-average); }
+.confidence-low { color: var(--performance-poor); }
+
+/* Responsive enhancements */
+@media (max-width: 768px) {
+  .sports-dashboard-card {
+    margin-bottom: 16px;
+  }
+  
+  .performance-bar {
+    height: 4px;
+  }
+}
+
+/* Animation for new data */
+@keyframes data-update {
+  0% { background-color: rgba(0, 200, 83, 0.3); }
+  100% { background-color: transparent; }
+}
+
+.data-updated {
+  animation: data-update 0.5s ease-out;
+}

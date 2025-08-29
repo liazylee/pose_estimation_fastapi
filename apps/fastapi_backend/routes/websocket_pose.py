@@ -20,7 +20,7 @@ router = APIRouter()
 def load_mongodb_config() -> Dict[str, str]:
     """Load MongoDB configuration from dev_pose_estimation_config.yaml"""
     try:
-        with open("/home/stanley/jobs/python/AI/pose_estimation_fastapi/apps/dev_pose_estimation_config.yaml",
+        with open("../../dev_pose_estimation_config.yaml",
                   "r") as f:
             config = yaml.safe_load(f)
 

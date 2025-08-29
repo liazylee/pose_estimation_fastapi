@@ -7,6 +7,15 @@ import VideoLikePoseCanvas2D from "@/components/VideoLikePoseCanvas2D";
 import TrackSelector from "@/components/TrackSelector";
 import SpeedChart from "@/components/SpeedChart";
 
+interface DisplayIdInfo {
+    id: string;
+    displayValue: number;
+    label: string;
+    type: 'jersey' | 'track';
+    confidence: number;
+    fallbackTrackId: number;
+}
+
 // WebSocket 连接状态
 enum ConnectionState {
     DISCONNECTED = 'disconnected',
@@ -163,9 +172,9 @@ export default function TaskDetail() {
     const [size, setSize] = useState({w: 1280, h: 720});
     const [videoSize, setVideoSize] = useState({w: 1280, h: 720});
 
-    // Track ID 选择相关状态 - 全局共享状态
-    const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null);
-    const [availableTrackIds, setAvailableTrackIds] = useState<number[]>([]);
+    // Display ID 选择相关状态 - 全局共享状态
+    const [selectedDisplayId, setSelectedDisplayId] = useState<string | null>(null);
+    const [availableDisplayIds, setAvailableDisplayIds] = useState<DisplayIdInfo[]>([]);
     const [renderMode, setRenderMode] = useState<'all' | 'single'>('single');
 
     // 速度图表状态
@@ -230,14 +239,14 @@ export default function TaskDetail() {
         return `${proto}://${loc.host}/ws/pose/${taskId}`;
     }, [taskId]);
 
-    // 当模式变化时自动选择合适的Track ID
+    // 当模式变化时自动选择合适的Display ID
     useEffect(() => {
-        if (renderMode === 'single' && selectedTrackId === null && availableTrackIds.length > 0) {
-            setSelectedTrackId(availableTrackIds[0]); // 自动选择第一个
+        if (renderMode === 'single' && selectedDisplayId === null && availableDisplayIds.length > 0) {
+            setSelectedDisplayId(availableDisplayIds[0].id); // 自动选择第一个
         } else if (renderMode === 'all') {
-            setSelectedTrackId(null);
+            setSelectedDisplayId(null);
         }
-    }, [renderMode, availableTrackIds, selectedTrackId]);
+    }, [renderMode, availableDisplayIds, selectedDisplayId]);
 
     // 同步速度图表的显示模式
     useEffect(() => {
@@ -281,20 +290,20 @@ export default function TaskDetail() {
         };
     }, [wsUrl, handleWebSocketMessage, handleWebSocketStateChange]);
 
-    const handleTrackIdsUpdate = (trackIds: number[]) => {
-        setAvailableTrackIds(trackIds);
+    const handleDisplayIdsUpdate = (displayIds: DisplayIdInfo[]) => {
+        setAvailableDisplayIds(displayIds);
 
-        // 如果当前选择的Track ID不在新列表中，重置选择
-        if (selectedTrackId !== null && !trackIds.includes(selectedTrackId)) {
-            if (trackIds.length > 0) {
-                setSelectedTrackId(trackIds[0]);
+        // 如果当前选择的Display ID不在新列表中，重置选择
+        if (selectedDisplayId !== null && !displayIds.some(d => d.id === selectedDisplayId)) {
+            if (displayIds.length > 0) {
+                setSelectedDisplayId(displayIds[0].id);
             } else {
-                setSelectedTrackId(null);
+                setSelectedDisplayId(null);
             }
         }
     };
 
-    const effectiveTrackId = renderMode === 'all' ? null : selectedTrackId;
+    const effectiveDisplayId = renderMode === 'all' ? null : selectedDisplayId;
 
     return (
         <Container size="xl" px="md">
@@ -334,9 +343,9 @@ export default function TaskDetail() {
                 {/* Track 选择器 - 只在单人模式显示 */}
                 {renderMode === 'single' && (
                     <TrackSelector
-                        availableTrackIds={availableTrackIds}
-                        selectedTrackId={selectedTrackId}
-                        onTrackIdChange={setSelectedTrackId}
+                        availableDisplayIds={availableDisplayIds}
+                        selectedDisplayId={selectedDisplayId}
+                        onDisplayIdChange={setSelectedDisplayId}
                         showStats={true}
                     />
                 )}
@@ -404,14 +413,15 @@ export default function TaskDetail() {
                                 height={size.h}
                                 videoWidth={videoSize.w}
                                 videoHeight={videoSize.h}
-                                selectedTrackId={effectiveTrackId}
+                                selectedDisplayId={effectiveDisplayId}
                                 showSkeleton
                                 showJoints
                                 showBBoxes
                                 showDebug={false} // 在dashboard中关闭debug
                                 targetFps={25}
                                 bufferSize={30}
-                                onTrackIdsUpdate={handleTrackIdsUpdate}
+                                onDisplayIdsUpdate={handleDisplayIdsUpdate}
+                                jerseyConfidenceThreshold={0.7}
                             />
                         </div>
                     </Stack>
@@ -426,8 +436,8 @@ export default function TaskDetail() {
                     connectionError={connectionError}
                     retryInfo={retryInfo}
                     onManualReconnect={manualReconnect}
-                    selectedTrackId={selectedTrackId}
-                    onTrackIdChange={setSelectedTrackId}
+                    selectedDisplayId={selectedDisplayId}
+                    onDisplayIdChange={setSelectedDisplayId}
                     showAllTracks={showAllTracksSpeed}
                     onShowAllTracksChange={(showAll) => {
                         setShowAllTracksSpeed(showAll);
@@ -435,6 +445,7 @@ export default function TaskDetail() {
                     }}
                     maxDataPoints={150}
                     height={350}
+                    jerseyConfidenceThreshold={0.7}
                 />
             </Card>
 
@@ -444,10 +455,14 @@ export default function TaskDetail() {
                 borderRadius: '8px'
             }}>
                 <Text size="sm" c="dimmed">
-                    📊 Mode: {renderMode === 'single' ? `Single (Track ${effectiveTrackId ?? 'None'})` : 'All Tracks'}
+                    📊 Mode: {renderMode === 'single' ? 
+                        `Single (${effectiveDisplayId ? 
+                            availableDisplayIds.find(d => d.id === effectiveDisplayId)?.label || 'Unknown'
+                            : 'None'})` 
+                        : 'All Players'}
                 </Text>
                 <Text size="sm" c="dimmed">
-                    👥 Available tracks: {availableTrackIds.length}
+                    👥 Available players: {availableDisplayIds.length} ({availableDisplayIds.filter(d => d.type === 'jersey').length} jerseys, {availableDisplayIds.filter(d => d.type === 'track').length} tracks)
                 </Text>
                 <Text size="sm" c="dimmed">
                     📐 Canvas: {size.w}×{size.h}
