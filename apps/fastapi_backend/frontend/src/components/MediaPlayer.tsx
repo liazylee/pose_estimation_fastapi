@@ -52,6 +52,7 @@ export default function MediaPlayer({ path, onSizeReady }: Props) {
         };
     }, [onSizeReady]);
 
+    // WebRTC 播放逻辑 (MediaMTX WHEP)
     const setupWebRTC = async () => {
         setIsConnecting(true);
         setError(null);
@@ -64,49 +65,73 @@ export default function MediaPlayer({ path, onSizeReady }: Props) {
         try {
             const peerConnection = new RTCPeerConnection({
                 iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' }
+                    {urls: 'stun:stun.l.google.com:19302'},
+                    {urls: 'stun:stun1.l.google.com:19302'}
                 ]
             });
 
             peerConnection.oniceconnectionstatechange = () => {
-                if (['connected', 'completed'].includes(peerConnection.iceConnectionState)) {
+                console.log('ICE Connection State:', peerConnection.iceConnectionState);
+                if (peerConnection.iceConnectionState === 'connected' ||
+                    peerConnection.iceConnectionState === 'completed') {
                     setIsConnecting(false);
-                } else if (['failed', 'disconnected'].includes(peerConnection.iceConnectionState)) {
+                }
+                if (peerConnection.iceConnectionState === 'failed' ||
+                    peerConnection.iceConnectionState === 'disconnected') {
                     setError('WebRTC connection failed');
                     setIsConnecting(false);
                 }
             };
 
             peerConnection.ontrack = (event) => {
+                console.log('Received track:', event);
                 if (event.streams && event.streams[0]) {
                     video.srcObject = event.streams[0];
-                    video.play().catch(console.error);
+                    video.play().catch((e) => {
+                        console.error('Video play failed:', e);
+                    });
                 }
             };
 
-            peerConnection.addTransceiver('video', { direction: 'recvonly' });
+            // 添加接收器用于视频
+            peerConnection.addTransceiver('video', {direction: 'recvonly'});
+
+            // 创建 offer
             const offer = await peerConnection.createOffer();
             await peerConnection.setLocalDescription(offer);
 
+            // 使用 WHEP 协议发送 offer 到 MediaMTX
             const response = await fetch(webrtcApiUrl, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/sdp' },
+                headers: {
+                    'Content-Type': 'application/sdp',
+                },
                 body: offer.sdp
             });
 
-            if (!response.ok) throw new Error(`WHEP request failed: ${response.status}`);
-            const answerSdp = await response.text();
-            await peerConnection.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+            if (!response.ok) {
+                throw new Error(`WHEP request failed: ${response.status} ${response.statusText}`);
+            }
 
-            return { peerConnection };
+            // 获取 answer SDP
+            const answerSdp = await response.text();
+            await peerConnection.setRemoteDescription({
+                type: 'answer',
+                sdp: answerSdp
+            });
+
+            console.log('WebRTC connection established via WHEP');
+
+            return {peerConnection};
         } catch (e: any) {
+            console.error('WebRTC setup error:', e);
             setError(`WebRTC setup failed: ${e.message}`);
             setIsConnecting(false);
             return null;
         }
     };
 
+    // HLS 播放逻辑
     const setupHLS = async () => {
         setIsConnecting(true);
         setError(null);
@@ -130,13 +155,13 @@ export default function MediaPlayer({ path, onSizeReady }: Props) {
                     video.play().catch(() => {});
                     setIsConnecting(false);
                 });
-                hls.on(Hls.Events.ERROR, (_e, data) => {
-                    if (data.fatal) {
-                        setError('HLS Playback failed: ' + data.type);
-                        setIsConnecting(false);
-                    }
-                });
-                return { hls };
+                // hls.on(Hls.Events.ERROR, (_e, data) => {
+                //     if (data.fatal) {
+                //         setError('HLS Playback failed: ' + data.type);
+                //         setIsConnecting(false);
+                //     }
+                // });
+                return {hls};
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                 video.src = hlsUrl;
                 video.play().catch(() => {});
@@ -148,7 +173,7 @@ export default function MediaPlayer({ path, onSizeReady }: Props) {
                 return null;
             }
         } catch (e: any) {
-            setError(e?.message || 'HLS playback failed');
+            setError(e?.message || 'HLS Playbook failed');
             setIsConnecting(false);
             return null;
         }
@@ -194,6 +219,7 @@ export default function MediaPlayer({ path, onSizeReady }: Props) {
                 };
             }
         };
+
         setup();
 
         return () => {
@@ -236,7 +262,7 @@ export default function MediaPlayer({ path, onSizeReady }: Props) {
                 ref={videoRef}
                 playsInline
                 controls
-                style={{ width: '100%', background: '#000', minHeight: 300 }}
+                style={{width: '100%', background: '#000', minHeight: 300}}
             />
 
             <Group>
@@ -248,7 +274,7 @@ export default function MediaPlayer({ path, onSizeReady }: Props) {
                 </Text>
                 {streamType === 'webrtc' && (
                     <Text size="xs" c="dimmed">
-                        WebRTC: <Badge variant="light" color="orange">{webrtcHost}</Badge>
+                        WebRTC: <Badge variant="light" color="orange">localhost:8888</Badge>
                     </Text>
                 )}
             </Group>

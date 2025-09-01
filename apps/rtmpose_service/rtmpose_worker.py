@@ -47,22 +47,23 @@ class RTMPoseWorker(BaseWorker):
 
     def _predict(self, inputs: Dict) -> Optional[Dict]:
         """Run RTMPose estimation on input frame."""
+        frame_id = inputs.get('frame_id', 'unknown')
         try:
             frame = inputs.get('image_bytes')
             if frame is None:
-                logger.error(f"Worker {self.worker_id} received empty input frame")
+                logger.error(f"[RTMPOSE] Worker {self.worker_id} Frame {frame_id}: empty input")
                 return None
 
             # Run model inference
             deserializer_frame = deserialize_image_from_kafka(frame)
             tracked_poses = inputs.get('tracked_poses', [])
             if not isinstance(tracked_poses, List):
-                logger.error(f"Worker {self.worker_id} received invalid detections format: {type(tracked_poses)}")
+                logger.error(f"[RTMPOSE] Worker {self.worker_id} Frame {frame_id}: invalid detections format")
                 return None
             detections = [i.get('bbox', []) for i in tracked_poses]
             pose_output, _ = self.pose_model(deserializer_frame, detections)
             if pose_output is None or len(pose_output) == 0:
-                logger.warning(f"Worker {self.worker_id} received empty pose output")
+                logger.warning(f"[RTMPOSE] Worker {self.worker_id} Frame {frame_id}: no poses detected")
                 return None
             pose_output = np.array(pose_output).tolist()
             # match pose output with detection IDs

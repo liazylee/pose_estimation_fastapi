@@ -21,6 +21,8 @@ class MultiInputInterface:
         self.max_pending_frames = 10000
         self._frame_id_order = []  #
         self.frame_timeout_sec = frame_timeout_sec
+        self._last_emitted_frame_id = -1  # Track last emitted frame_id for logging
+        self.window_size_frames = self.frame_timeout_sec * 25
 
     async def initialize(self) -> bool:
         """Initialize all input interfaces and start producers."""
@@ -67,28 +69,64 @@ class MultiInputInterface:
                         self._frame_id_order.append(frame_id)
 
                     self._data_dict[frame_id][interface_idx] = data
-
-                    # If buffer too large, drop oldest
+                    right_edge = self._last_emitted_frame_id + self.window_size_frames
+                    if frame_id > right_edge:
+                        cutoff = self._last_emitted_frame_id
+                        while self._frame_id_order and self._frame_id_order[0] <= cutoff:
+                            old_id = self._frame_id_order.pop(0)
+                            if old_id in self._data_dict:
+                                del self._data_dict[old_id]
+                            logging.warning(f"Dropped stale frame {old_id} due to sliding window")
                     if len(self._frame_id_order) > self.max_pending_frames:
                         old_frame_id = self._frame_id_order.pop(0)
                         if old_frame_id in self._data_dict:
                             del self._data_dict[old_frame_id]
-                            logging.warning(f"Dropped frame {old_frame_id} due to pending overflow")
+                        pending_data_structure = {
+                            interface_idx: f"frame_{list(self._data_dict[old_frame_id].keys())}"
+                            if old_frame_id in self._data_dict else "no_data"
+                            for interface_idx in range(self._num_interfaces)
+                        }
+                        logging.warning(
+                            f"[MULTI_INPUT_OVERFLOW] Dropped frame {old_frame_id} due to pending overflow. "
+                            f"Current pending: {len(self._frame_id_order)}/{self.max_pending_frames}. "
+                            f"Data structure: {pending_data_structure}. "
+                            f"Latest frame: {frame_id}, Interface: {interface_idx}"
+                        )
 
-                    # If this frame is now complete
+                    completed_payload = None
                     if len(self._data_dict[frame_id]) == self._num_interfaces:
-                        await self._queue.put(self._data_dict[frame_id])
+                        completed_payload = self._data_dict[frame_id]
                         del self._data_dict[frame_id]
-                        self._frame_id_order.remove(frame_id)
-                        logging.debug(f"Synchronized frame {frame_id} with {self._num_interfaces} interfaces")
-                    else:
-                        # 记录当前帧的同步状态
-                        missing_interfaces = [i for i in range(self._num_interfaces) if i not in self._data_dict[frame_id]]
-                        logging.debug(f"Frame {frame_id} waiting for interfaces: {missing_interfaces}")
-                        
+                        #
+                        try:
+                            self._frame_id_order.remove(frame_id)
+                        except ValueError:
+                            pass
+                        if frame_id > self._last_emitted_frame_id:
+                            self._last_emitted_frame_id = frame_id
+                        # else:
+                        #     missing_interfaces = [i for i in range(self._num_interfaces)
+                        #                           if i not in self._data_dict[frame_id]]
+                        #     available_interfaces = list(self._data_dict[frame_id].keys())
+                        #
+                        #     # 每30帧或者缺失接口超过2个时记录warning级别日志
+                        #     if frame_id % 30 == 0 or len(missing_interfaces) > 1:
+                        #         logging.warning(
+                        #             f"[SYNC_WAIT] Frame {frame_id} waiting for interfaces: {missing_interfaces}. "
+                        #             f"Available: {available_interfaces}. "
+                        #             f"Pending frames: {len(self._frame_id_order)}. "
+                        #             f"Receiving interface: {interface_idx}"
+                        #         )
+                        else:
+                            logging.debug(f"Frame {frame_id} waiting for interfaces: {missing_interfaces}")
+                if completed_payload is not None:
+                    await self._queue.put(completed_payload)
+                    logging.debug(f"Synchronized frame {frame_id} with {self._num_interfaces} interfaces")
+
+
             except Exception as e:
                 logging.error(f"Interface {interface_idx} error: {e}")
-                await asyncio.sleep(1)  # Prevent tight loop on error
+                await asyncio.sleep(1)  #
 
     async def read_data(self) -> Dict[str, Any]:
         """Read synchronized data for a frame_id from the queue."""

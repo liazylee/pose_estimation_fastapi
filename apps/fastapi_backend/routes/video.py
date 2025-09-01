@@ -76,7 +76,7 @@ async def upload_video(
     # Initialize task status
     task_status = TaskStatus(
         task_id=task_id,
-        status="initializing",
+        status="completed",
         progress=0,
         created_at=datetime.utcnow(),
         input_file=str(file_path),
@@ -84,7 +84,7 @@ async def upload_video(
         error=None
     )
     update_task_status(task_id, task_status)
-    
+
     # Save video upload record to MongoDB
     try:
         output_video_path = f"output_videos/annotated_{task_id}.mp4"
@@ -94,18 +94,18 @@ async def upload_video(
             file_path=str(file_path),
             file_size=file_path.stat().st_size,
             created_at=datetime.utcnow(),
-            status="initializing",
+            status="completed",
             output_video_path=output_video_path,
             stream_url=f"{RTSP_BASE_URL}/{task_id}"
         )
-        
+
         # Save to MongoDB asynchronously (don't fail upload if MongoDB fails)
         save_success = await mongodb_client.save_video_record(video_record)
         if save_success:
             logger.info(f"Video upload record saved to MongoDB for task_id: {task_id}")
         else:
             logger.warning(f"Failed to save video upload record to MongoDB for task_id: {task_id}")
-            
+
     except Exception as e:
         logger.error(f"Error saving video record to MongoDB: {e}")
         # Continue without failing the upload
@@ -225,11 +225,11 @@ async def get_video_record(task_id: str):
         Video upload record information
     """
     mongodb_client = get_mongodb_client()
-    
+
     record = await mongodb_client.get_video_record(task_id)
     if not record:
         raise HTTPException(status_code=404, detail="Video record not found")
-    
+
     return record
 
 
@@ -246,7 +246,7 @@ async def list_video_records(limit: int = 50, skip: int = 0):
         List of video upload records
     """
     mongodb_client = get_mongodb_client()
-    
+
     records = await mongodb_client.list_video_records(limit=limit, skip=skip)
     return {
         "records": records,

@@ -1,6 +1,6 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useParams} from 'react-router-dom';
-import {Alert, Badge, Card, Container, Group, Stack, Switch, Text, TextInput, Title} from '@mantine/core';
+import {Alert, Badge, Card, Container, Group, SimpleGrid, Stack, Switch, Text, TextInput, Title} from '@mantine/core';
 import * as api from '@/api';
 import MediaPlayer from '@/components/MediaPlayer';
 import VideoLikePoseCanvas2D from "@/components/VideoLikePoseCanvas2D";

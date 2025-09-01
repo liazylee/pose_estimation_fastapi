@@ -40,7 +40,7 @@ class KafkaInput(ABC):
         self.group_id = f"{self.group_id}_{unique_suffix}"
         self.auto_offset_reset = config.get('auto_offset_reset', 'earliest')
         self.max_poll_records = config.get('max_poll_records', 1)
-        self.consumer_timeout_ms = config.get('consumer_timeout_ms', 1000)
+        self.consumer_timeout_ms = config.get('consumer_timeout_ms', 10)
         self.enable_auto_commit = config.get('enable_auto_commit', True)
 
         # Asyncio constructs

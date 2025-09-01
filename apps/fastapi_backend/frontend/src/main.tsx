@@ -11,6 +11,8 @@ import Dashboard from './pages/Dashboard';
 import Upload from './pages/Upload';
 import TaskDetail from './pages/TaskDetail';
 import Streams from './pages/Streams';
+import VideoHistory from './pages/VideoHistory';
+import VideoAnalysis from './pages/VideoAnalysis';
 
 const router = createBrowserRouter([
     {
@@ -21,6 +23,8 @@ const router = createBrowserRouter([
             {path: 'upload', element: <Upload/>},
             {path: 'tasks/:taskId', element: <TaskDetail/>},
             {path: 'streams', element: <Streams/>},
+            {path: 'history', element: <VideoHistory/>},
+            {path: 'video-analysis/:taskId', element: <VideoAnalysis/>},
         ],
     },
 ], {

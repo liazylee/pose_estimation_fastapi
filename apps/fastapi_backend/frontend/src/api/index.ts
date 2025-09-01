@@ -1,5 +1,5 @@
 import { api } from './http';
-import type { HealthResponse, UploadResponse, TaskStatus, StreamsResponse } from './types';
+import type { HealthResponse, UploadResponse, TaskStatus, StreamsResponse, VideoRecordsResponse } from './types';
 
 export * from './http'
 
@@ -34,5 +34,8 @@ export const getAnnotationStatus = (taskId: string) => api.get(`/api/annotation/
 
 export const startPipeline = (taskId: string, config?: any) => api.post(`/api/ai/pipeline/start`, { task_id: taskId, config }).then(r => r.data);
 export const stopPipeline = (taskId: string) => api.post(`/api/ai/pipeline/${taskId}/stop`).then(r => r.data);
+
+export const getVideoRecords = (limit: number = 50, skip: number = 0) =>
+  api.get<VideoRecordsResponse>(`/records?limit=${limit}&skip=${skip}`).then(r => r.data);
 
 
