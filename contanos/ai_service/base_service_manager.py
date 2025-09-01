@@ -101,7 +101,6 @@ class BaseServiceManager:
                             devices: Optional[List[str]] = None, log_level: Optional[str] = None,
                             max_restarts: int = 30, auto_stop_on_completion: bool = True) -> Dict[str, Any]:
         """Start an AI service with the given task_id."""
-        
         if config_path is None:
             config_path = self.config.default_config_path
 
@@ -145,7 +144,8 @@ class BaseServiceManager:
                 task = asyncio.create_task(self._run_service(task_id, service))
                 self.tasks[task_id] = task
 
-                logger.info(f"Started {self.config.service_name} service for task_id: {task_id} (max_restarts: {max_restarts})")
+                logger.info(
+                    f"Started {self.config.service_name} service for task_id: {task_id} (max_restarts: {max_restarts})")
 
                 return {
                     "success": True,
@@ -181,9 +181,13 @@ class BaseServiceManager:
                             break  # Don't restart if manually stopped or completed
 
                         self.services[task_id]["status"] = "running"
-
-                # Start the service
-                await service.start_service()
+                try:
+                    # Start the service
+                    await service.start_service()
+                except Exception as e:
+                    logger.error(f"Failed to start {self.config.service_name} service for task_id: {task_id}: {str(e)}")
+                    logger.error(f"Error starting {self.config.service_name} service for task_id '{task_id}': {e}")
+                    raise
 
                 # If we reach here, service completed normally
                 async with self._lock:
@@ -224,10 +228,12 @@ class BaseServiceManager:
                                 "completed_at": datetime.now().isoformat(),
                                 "error_message": f"Service failed after {max_restarts} restart attempts: {error_msg}"
                             })
-                            logger.error(f"{self.config.service_name} service {task_id} failed after {max_restarts} restart attempts")
+                            logger.error(
+                                f"{self.config.service_name} service {task_id} failed after {max_restarts} restart attempts")
                             break
                         else:
-                            logger.warning(f"Restarting {self.config.service_name} service {task_id} (attempt {restart_count}/{max_restarts})")
+                            logger.warning(
+                                f"Restarting {self.config.service_name} service {task_id} (attempt {restart_count}/{max_restarts})")
                             # Wait before restarting
                             await asyncio.sleep(min(restart_count * 2, 60))  # Exponential backoff, max 60s
 
@@ -359,4 +365,4 @@ class BaseServiceManager:
             "services": service_status,
             "uptime_seconds": uptime,
             "last_check": now
-        } 
+        }

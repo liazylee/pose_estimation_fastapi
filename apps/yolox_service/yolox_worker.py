@@ -5,10 +5,12 @@ YOLOX Detection Worker using contanos framework.
 import logging
 from typing import Dict, Optional
 
-from rtmlib.tools.object_detection import YOLOX as YOLOXModel
-
+from apps.yolox_service.MultiGPUYolo import MultiGPUYOLOX as YOLOX
 from contanos import deserialize_image_from_kafka
 from contanos.base_worker import BaseWorker
+
+
+# from rtmlib import YOLOX
 
 
 class YOLOXWorker(BaseWorker):
@@ -28,11 +30,11 @@ class YOLOXWorker(BaseWorker):
         try:
             # Create model configuration
             device = self.device
-            if self.device.startswith('cuda'):
-                device = 'cuda'
+            # if self.device.startswith('cuda'):
+            #     device = 'cuda'
             model_config = self.model_config
             # Handle different model configuration formats
-            self.model = YOLOXModel(**model_config, device=device)
+            self.model = YOLOX(**model_config, device=device)
             logging.info(f"YOLOXWorker {self.worker_id} model initialized successfully")
 
         except Exception as e:

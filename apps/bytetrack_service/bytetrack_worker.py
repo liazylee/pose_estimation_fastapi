@@ -49,8 +49,8 @@ class ByteTrackWorker(BaseWorker):
         self.current_task_id = None
         self.tracker = None
         self.tracker_type = "unknown"
-        self.meters_per_pixel = float(self.model_config.get('meters_per_pixel', 0.0))  # 没有标定就用 0
-        self.frame_rate = float(self.model_config.get('frame_rate', 25))  # 已在配置中提供
+        self.meters_per_pixel = float(self.model_config.get('meters_per_pixel', 0.0))  #
+        self.frame_rate = float(self.model_config.get('frame_rate', 25))  #
         self._last_state = {}
         self._track_history = {}  # {track_id: deque([(ts, cx, cy, h), ...])}
         self._speed_smoothed = {}  # {track_id: smoothed_speed_mps}

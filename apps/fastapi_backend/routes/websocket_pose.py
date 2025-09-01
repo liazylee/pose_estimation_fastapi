@@ -4,6 +4,7 @@ WebSocket API for real-time pose annotation results from MongoDB.
 import asyncio
 import json
 import logging
+from pathlib import Path
 from typing import Dict, Any, List
 from urllib.parse import parse_qs
 
@@ -15,13 +16,14 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+CONFIG_PATH = Path(__file__).resolve().parents[2] / "dev_pose_estimation_config.yaml"
+
 
 # Load MongoDB configuration from config file
 def load_mongodb_config() -> Dict[str, str]:
     """Load MongoDB configuration from dev_pose_estimation_config.yaml"""
     try:
-        with open("../../dev_pose_estimation_config.yaml",
-                  "r") as f:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as f:
             config = yaml.safe_load(f)
 
         # Extract MongoDB config from annotation output

@@ -121,6 +121,7 @@ bytetrack:
   # Jersey number detection configuration
   jersey_detection:
     enabled: true
+    devices: "cuda:0"  # Use GPU for jersey detection
     # OCR model configuration
     ocr:
       weights_path: "jersey_ocr_best.pth"  # Path to jersey OCR model weights

@@ -6,10 +6,12 @@ import logging
 from typing import Dict, Optional, List
 
 import numpy as np
-from rtmlib.tools.pose_estimation import RTMPose
 
+from apps.rtmpose_service.multiGPURTMpose import MultiGPURTMPose as RTMPose
 from contanos import deserialize_image_from_kafka
 from contanos.base_worker import BaseWorker
+
+# from rtmlib.tools.pose_estimation import RTMPose  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +34,8 @@ class RTMPoseWorker(BaseWorker):
         """Initialize the RTMPose model."""
         try:
             device = self.device
-            if self.device.startswith('cuda:'):
-                device = 'cuda'
+            # if self.device.startswith('cuda:'):
+            #     device = 'cuda'
             model_config = self.model_config
             self.pose_model = RTMPose(**model_config, device=device)
 
