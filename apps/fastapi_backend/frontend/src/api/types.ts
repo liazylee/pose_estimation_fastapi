@@ -35,4 +35,25 @@ export type StreamsResponse = {
   count: number;
 };
 
+export type VideoRecord = {
+  _id: string;
+  task_id: string;
+  filename: string;
+  file_size: number;
+  created_at: string;
+  status: string;
+  output_video_path: string;
+  stream_url: string;
+  output_video_url: string;
+  duration?: number;
+  [key: string]: any;
+};
+
+export type VideoRecordsResponse = {
+  records: VideoRecord[];
+  count: number;
+  limit: number;
+  skip: number;
+};
+
 

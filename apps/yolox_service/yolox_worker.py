@@ -43,10 +43,11 @@ class YOLOXWorker(BaseWorker):
 
     def _predict(self, inputs: Dict) -> Optional[Dict]:
         """Run YOLOX detection on input frame."""
+        frame_id = inputs.get('frame_id', 'unknown')
         try:
             frame = inputs.get('image_bytes')
             if frame is None:
-                logging.error(f"Worker {self.worker_id} received empty input frame")
+                logging.error(f"[YOLOX] Worker {self.worker_id} Frame {frame_id}: empty input")
                 return None
 
             deserializer_frame = deserialize_image_from_kafka(frame)
@@ -55,7 +56,7 @@ class YOLOXWorker(BaseWorker):
             model_output = self.model(deserializer_frame)
             # output :[[  1.7640184   2.6469145 212.87782   337.55084  ]]
             if model_output is None or len(model_output) == 0:
-                logging.warning(f"Worker {self.worker_id} received empty model output")
+                logging.warning(f"[YOLOX] Worker {self.worker_id} Frame {frame_id}: no detections")
                 return None
             # Convert model output to detection format
             detections = []
@@ -79,5 +80,5 @@ class YOLOXWorker(BaseWorker):
             return result
 
         except Exception as e:
-            logging.error(f"Worker {self.worker_id} prediction error: {e}")
+            logging.error(f"[YOLOX] Worker {self.worker_id} Frame {frame_id}: error - {e}")
             return None

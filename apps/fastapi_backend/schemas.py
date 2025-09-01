@@ -46,7 +46,6 @@ class VideoUploadRecord(BaseModel):
     created_at: datetime
     status: str  # initializing, processing, completed, failed
     output_video_path: Optional[str] = None
-    file_url: str
     stream_url: str
 
     class Config:

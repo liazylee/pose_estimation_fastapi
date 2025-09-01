@@ -1,6 +1,6 @@
 import {ActionIcon, Anchor, AppShell, Box, Group, NavLink, Title, useMantineColorScheme} from '@mantine/core';
 import {Link, Outlet, useLocation} from 'react-router-dom';
-import {Activity, Cloud, Moon, Sun, Upload, Video} from 'lucide-react';
+import {Activity, Cloud, History, Moon, Sun, Upload, Video} from 'lucide-react';
 
 export default function App() {
     const location = useLocation();
@@ -36,7 +36,9 @@ export default function App() {
                          active={isActive('/upload')}/>
                 <NavLink component={Link} to="/streams" label="Streams" leftSection={<Video size={16}/>}
                          active={isActive('/streams')}/>
-                <NavLink component={Link} to="/dashboard" label="backend Dashboard" leftSection={<Cloud size={16}/>}/>
+                <NavLink component={Link} to="/history" label="Video History" leftSection={<History size={16}/>}
+                         active={isActive('/history')}/>
+                <NavLink component={Link} to="/docs" label="backend Dashboard" leftSection={<Cloud size={16}/>}/>
             </AppShell.Navbar>
             <AppShell.Main>
                 <Box mx="auto" maw={1200} w="100%">

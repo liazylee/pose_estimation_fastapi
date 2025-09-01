@@ -42,7 +42,7 @@ kafka:
   consumer:
     auto_offset_reset: "earliest"
     max_poll_records: 1
-    consumer_timeout_ms: 1000
+    consumer_timeout_ms: 10
     enable_auto_commit: true
   # Queue length limits
   queue_limits:
@@ -202,17 +202,14 @@ annotation:
     enabled: true
     output_dir: "output_videos"
     filename_template: "annotated_{task_id}.mp4"
-    # Video encoding parameters
     width: 1920
     height: 1080
-    fps: 25  # 重要：应该与输入视频fps一致，否则会导致时长变化
-    codec: "mp4v"  # Use libx264 for better compatibility
-    preset: "fast"     # FFmpeg preset: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
-    crf: 23           # Constant Rate Factor: 0-51 (lower = better quality, 23 is good balance)
-    bitrate: "4000k"  # Target bitrate
-    pixel_format: "yuv420p"  # Standard pixel format for MP4
-    queue_max_len: 100  # Maximum frames in output queue
-
+    fps: 25
+    codec: "h264"  # opytions:["h264", "hevc", "mpeg4"]
+    preset: "fast"
+    crf: 23
+    pixel_format: "yuv420p"
+    queue_max_len: 100
 # Service dependencies (startup order)
 service_dependencies:
   - name: "yolox"

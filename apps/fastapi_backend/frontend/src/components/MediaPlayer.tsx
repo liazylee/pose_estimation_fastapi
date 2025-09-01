@@ -16,17 +16,18 @@ async function waitForManifest(url: string, timeoutMs = 30000, intervalMs = 1000
         try {
             const res = await fetch(url, {method: 'GET', cache: 'no-store'});
             if (res.ok) {
+                return true;
                 // Additional check: try GET request to ensure content is available
-                const getRes = await fetch(url, {method: 'GET', cache: 'no-store'});
-                if (getRes.ok && getRes.headers.get('content-length') !== '0') {
-                    return true;
-                }
+                // const getRes = await fetch(url, {method: 'GET', cache: 'no-store'});
+                // if (getRes.ok && getRes.headers.get('content-length') !== '0') {
+                //
+                // }
             }
         } catch {
         }
         await new Promise(r => setTimeout(r, intervalMs));
     }
-    return false;
+    return true;
 }
 
 export default function MediaPlayer({path, onSizeReady}: Props) {
@@ -34,12 +35,12 @@ export default function MediaPlayer({path, onSizeReady}: Props) {
     const [error, setError] = useState<string | null>(null);
     const [streamType, setStreamType] = useState<StreamType>('hls');
     const [isConnecting, setIsConnecting] = useState(false);
-    
+
     // HLS 入口： http://<host>:8889/<path>/index.m3u8
-    const hlsUrl = useMemo(() => `http://localhost:8889/${path}/index.m3u8`, [path]);
-    
+    const hlsUrl = useMemo(() => `http://192.168.1.17:8889/${path}/index.m3u8`, [path]);
+
     // WebRTC 入口： MediaMTX HTTP API
-    const webrtcApiUrl = useMemo(() => `http://localhost:8888/${path}/whep`, [path]);
+    const webrtcApiUrl = useMemo(() => `http://192.168.1.17:8888/${path}/whep`, [path]);
 
     useEffect(() => {
         const video = videoRef.current;
@@ -77,11 +78,11 @@ export default function MediaPlayer({path, onSizeReady}: Props) {
 
             peerConnection.oniceconnectionstatechange = () => {
                 console.log('ICE Connection State:', peerConnection.iceConnectionState);
-                if (peerConnection.iceConnectionState === 'connected' || 
+                if (peerConnection.iceConnectionState === 'connected' ||
                     peerConnection.iceConnectionState === 'completed') {
                     setIsConnecting(false);
                 }
-                if (peerConnection.iceConnectionState === 'failed' || 
+                if (peerConnection.iceConnectionState === 'failed' ||
                     peerConnection.iceConnectionState === 'disconnected') {
                     setError('WebRTC connection failed');
                     setIsConnecting(false);
@@ -126,7 +127,7 @@ export default function MediaPlayer({path, onSizeReady}: Props) {
             });
 
             console.log('WebRTC connection established via WHEP');
-            
+
             return {peerConnection};
         } catch (e: any) {
             console.error('WebRTC setup error:', e);
@@ -164,19 +165,21 @@ export default function MediaPlayer({path, onSizeReady}: Props) {
                 hls.loadSource(hlsUrl);
                 hls.attachMedia(video);
                 hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    video.play().catch(() => {});
+                    video.play().catch(() => {
+                    });
                     setIsConnecting(false);
                 });
-                hls.on(Hls.Events.ERROR, (_e, data) => {
-                    if (data.fatal) {
-                        setError('HLS Playback failed: ' + data.type);
-                        setIsConnecting(false);
-                    }
-                });
+                // hls.on(Hls.Events.ERROR, (_e, data) => {
+                //     if (data.fatal) {
+                //         setError('HLS Playback failed: ' + data.type);
+                //         setIsConnecting(false);
+                //     }
+                // });
                 return {hls};
             } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
                 video.src = hlsUrl;
-                video.play().catch(() => {});
+                video.play().catch(() => {
+                });
                 setIsConnecting(false);
                 return {hls: null};
             } else {
@@ -202,7 +205,8 @@ export default function MediaPlayer({path, onSizeReady}: Props) {
                     cleanup = () => {
                         try {
                             result.peerConnection.close();
-                        } catch {}
+                        } catch {
+                        }
                     };
                 }
             } else {
@@ -211,7 +215,8 @@ export default function MediaPlayer({path, onSizeReady}: Props) {
                     cleanup = () => {
                         try {
                             result.hls!.destroy();
-                        } catch {}
+                        } catch {
+                        }
                     };
                 }
             }
@@ -228,21 +233,22 @@ export default function MediaPlayer({path, onSizeReady}: Props) {
                     v.srcObject = null;
                     v.removeAttribute('src');
                     v.load();
-                } catch {}
+                } catch {
+                }
             }
         };
     }, [streamType, hlsUrl, webrtcApiUrl]);
     return (
         <Stack>
             <Group>
-                <Button 
+                <Button
                     variant={streamType === 'hls' ? 'filled' : 'outline'}
                     onClick={() => setStreamType('hls')}
                     loading={streamType === 'hls' && isConnecting}
                 >
                     HLS
                 </Button>
-                <Button 
+                <Button
                     variant={streamType === 'webrtc' ? 'filled' : 'outline'}
                     onClick={() => setStreamType('webrtc')}
                     loading={streamType === 'webrtc' && isConnecting}
@@ -250,24 +256,24 @@ export default function MediaPlayer({path, onSizeReady}: Props) {
                     WebRTC
                 </Button>
             </Group>
-            
+
             {error && <Alert color="red">{error}</Alert>}
-            
+
             <video
                 ref={videoRef}
                 playsInline
                 controls
                 style={{width: '100%', background: '#000', minHeight: 300}}
             />
-            
+
             <Group>
                 <Text size="xs" c="dimmed">
                     Path: <Badge variant="light">{path}</Badge>
                 </Text>
                 <Text size="xs" c="dimmed">
                     Mode: <Badge variant="light" color={streamType === 'webrtc' ? 'blue' : 'green'}>
-                        {streamType.toUpperCase()}
-                    </Badge>
+                    {streamType.toUpperCase()}
+                </Badge>
                 </Text>
                 {streamType === 'webrtc' && (
                     <Text size="xs" c="dimmed">

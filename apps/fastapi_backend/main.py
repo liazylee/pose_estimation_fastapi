@@ -57,10 +57,9 @@ app.mount("/media/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="upload
 # Mount output videos from annotation service
 from pathlib import Path
 
-ANNOTATION_OUTPUT_DIR = Path(
-    "/home/stanley/jobs/python/AI/pose_estimation_fastapi/apps/annotation_service/output_videos")
+ANNOTATION_OUTPUT_DIR = Path(__file__).parent.parent / "annotation_service" / "output_videos"
 if ANNOTATION_OUTPUT_DIR.exists():
-    app.mount("/media/outputs", StaticFiles(directory=str(ANNOTATION_OUTPUT_DIR)), name="outputs")
+    app.mount("/media/outputs", StaticFiles(directory=str(ANNOTATION_OUTPUT_DIR), html=False), name="outputs")
 
 # Mount SPA (if built)
 frontend_built = FRONTEND_DIST_DIR.exists() and (FRONTEND_DIST_DIR / "index.html").exists()

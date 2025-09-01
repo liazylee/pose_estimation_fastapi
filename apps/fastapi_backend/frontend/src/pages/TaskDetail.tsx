@@ -205,25 +205,21 @@ export default function TaskDetail() {
     }, []);
 
     useEffect(() => {
-        let active = true;
-        const poll = async () => {
+        // 只在页面初始化时获取一次状态，不再轮询
+        const fetchInitialStatus = async () => {
             try {
                 const [s, p] = await Promise.all([
                     getTaskStatus(taskId),
                     getPipelineStatus(taskId),
                 ]);
-                if (!active) return;
                 setStatus(s);
                 setPipeline(p);
-            } catch {
+            } catch (error) {
+                console.error('Failed to fetch initial status:', error);
             }
         };
-        poll();
-        const id = setInterval(poll, 3000);
-        return () => {
-            active = false;
-            clearInterval(id);
-        };
+        
+        fetchInitialStatus();
     }, [taskId]);
 
     useEffect(() => {
