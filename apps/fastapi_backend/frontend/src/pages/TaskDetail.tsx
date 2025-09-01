@@ -194,8 +194,8 @@ export default function TaskDetail() {
         const el = containerRef.current;
         const ro = new ResizeObserver(entries => {
             for (const entry of entries) {
-                // 使用固定宽度，更适合dashboard布局
-                const cw = Math.max(640, Math.floor(entry.contentRect.width));
+                // 垂直布局下使用更大的宽度，充分利用空间
+                const cw = Math.max(900, Math.floor(entry.contentRect.width * 0.9));
                 const ch = Math.floor((cw * 9) / 16);
                 setSize({w: cw, h: ch});
             }
@@ -358,51 +358,49 @@ export default function TaskDetail() {
                 )}
             </Card>
 
-            {/* 主要内容区域 - Dashboard 布局 */}
-            <SimpleGrid cols={{base: 1, md: 2}} spacing="lg">
-                {/* 左列：视频播放 */}
-                <Card withBorder>
-                    <Stack gap="sm">
+            {/* 主要内容区域 - 垂直堆叠布局 */}
+            <Stack gap="xl">
+                {/* 上面：处理后的视频 */}
+                <Card withBorder p="lg">
+                    <Stack gap="md">
                         <Group justify="space-between" align="center">
-                            <Text fw={600}>📹 Processed Video Stream</Text>
-                            <Badge variant="outline">RTSP</Badge>
+                            <Text fw={600} size="lg">📹 Processed Video Stream</Text>
+                            <Badge variant="outline" size="lg">RTSP</Badge>
                         </Group>
-                        <div style={{width: '100%'}} ref={containerRef}>
+                        <div style={{width: '100%', display: 'flex', justifyContent: 'center'}} ref={containerRef}>
                             <MediaPlayer
                                 path={(rtsp || '').replace('rtsp://localhost:8554/', '') || testUrl || ''}
                                 onSizeReady={(w, h) => {
                                     console.log('Video size:', w, h);
                                     setVideoSize({w, h});
-                                    // 使用容器宽度
-                                    const containerWidth = Math.max(480, Math.floor(containerRef.current?.clientWidth || 640));
+                                    // 垂直布局下使用全宽度，提供更好的观看体验
+                                    const containerWidth = Math.max(1000, Math.floor(containerRef.current?.clientWidth * 0.85 || 1200));
                                     const containerHeight = Math.floor((containerWidth * 9) / 16);
                                     setSize({w: containerWidth, h: containerHeight});
                                 }}
                             />
-
                         </div>
-                        <Group justify="space-between" align="center">
-                            <Text fw={600}>📹 Processed Video Stream</Text>
-                            <Badge variant="outline">RTSP</Badge>
+                        <Group justify="space-between" align="center" mt="xs">
+                            <Text size="sm" c="dimmed">RTSP: {rtsp || 'not available'}</Text>
+                            <TextInput
+                                placeholder="test url (optional)"
+                                value={testUrl}
+                                onChange={(e) => setTestUrl(e.currentTarget.value)}
+                                size="sm"
+                                style={{maxWidth: '300px'}}
+                            />
                         </Group>
-                        <Text size="sm" c="dimmed">RTSP: {rtsp || 'not available'}</Text>
-                        <TextInput
-                            placeholder="test url (optional)"
-                            value={testUrl}
-                            onChange={(e) => setTestUrl(e.currentTarget.value)}
-                            size="sm"
-                        />
                     </Stack>
                 </Card>
 
-                {/* 右列：Pose Canvas */}
-                <Card withBorder>
-                    <Stack gap="sm">
+                {/* 中间：Pose Canvas */}
+                <Card withBorder p="lg">
+                    <Stack gap="md">
                         <Group justify="space-between" align="center">
-                            <Text fw={600}>🎯 Pose Tracking</Text>
-                            <Badge variant="outline">WebSocket</Badge>
+                            <Text fw={600} size="lg">🎯 Pose Tracking</Text>
+                            <Badge variant="outline" size="lg">WebSocket</Badge>
                         </Group>
-                        <div style={{width: '100%', height: size.h}}>
+                        <div style={{width: '100%', display: 'flex', justifyContent: 'center'}}>
                             <VideoLikePoseCanvas2D
                                 frameData={latestFrameData}
                                 connectionState={connectionState}
@@ -417,7 +415,7 @@ export default function TaskDetail() {
                                 showSkeleton
                                 showJoints
                                 showBBoxes
-                                showDebug={false} // 在dashboard中关闭debug
+                                showDebug={false}
                                 targetFps={25}
                                 bufferSize={30}
                                 onDisplayIdsUpdate={handleDisplayIdsUpdate}
@@ -426,28 +424,34 @@ export default function TaskDetail() {
                         </div>
                     </Stack>
                 </Card>
-            </SimpleGrid>
 
-            {/* 底部：速度图表 */}
-            <Card withBorder mt="lg">
-                <SpeedChart
-                    frameData={latestFrameData}
-                    connectionState={connectionState}
-                    connectionError={connectionError}
-                    retryInfo={retryInfo}
-                    onManualReconnect={manualReconnect}
-                    selectedDisplayId={selectedDisplayId}
-                    onDisplayIdChange={setSelectedDisplayId}
-                    showAllTracks={showAllTracksSpeed}
-                    onShowAllTracksChange={(showAll) => {
-                        setShowAllTracksSpeed(showAll);
-                        setRenderMode(showAll ? 'all' : 'single');
-                    }}
-                    maxDataPoints={150}
-                    height={350}
-                    jerseyConfidenceThreshold={0.7}
-                />
-            </Card>
+                {/* 下面：速度图表 */}
+                <Card withBorder p="lg">
+                    <Stack gap="md">
+                        <Group justify="space-between" align="center">
+                            <Text fw={600} size="lg">📊 Speed Chart</Text>
+                            <Badge variant="outline" size="lg">Real-time</Badge>
+                        </Group>
+                        <SpeedChart
+                            frameData={latestFrameData}
+                            connectionState={connectionState}
+                            connectionError={connectionError}
+                            retryInfo={retryInfo}
+                            onManualReconnect={manualReconnect}
+                            selectedDisplayId={selectedDisplayId}
+                            onDisplayIdChange={setSelectedDisplayId}
+                            showAllTracks={showAllTracksSpeed}
+                            onShowAllTracksChange={(showAll) => {
+                                setShowAllTracksSpeed(showAll);
+                                setRenderMode(showAll ? 'all' : 'single');
+                            }}
+                            maxDataPoints={150}
+                            height={300}
+                            jerseyConfidenceThreshold={0.7}
+                        />
+                    </Stack>
+                </Card>
+            </Stack>
 
             {/* 状态信息 */}
             <Group gap="md" justify="center" mt="lg" p="md" style={{
