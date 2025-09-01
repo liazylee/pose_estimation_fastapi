@@ -1,11 +1,12 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useParams} from 'react-router-dom';
-import {Alert, Badge, Card, Container, Group, SimpleGrid, Stack, Switch, Text, TextInput, Title} from '@mantine/core';
-import {getAnnotationRtsp, getPipelineStatus, getTaskStatus} from '@/api';
+import {Alert, Badge, Card, Container, Group, Stack, Switch, Text, TextInput, Title} from '@mantine/core';
+import * as api from '@/api';
 import MediaPlayer from '@/components/MediaPlayer';
 import VideoLikePoseCanvas2D from "@/components/VideoLikePoseCanvas2D";
 import TrackSelector from "@/components/TrackSelector";
 import SpeedChart from "@/components/SpeedChart";
+import { useGlobalStore } from '@/store/global';
 
 interface DisplayIdInfo {
     id: string;
@@ -141,30 +142,15 @@ class SharedWebSocketManager {
         setTimeout(() => this.connect(), 100);
     }
 
-    getConnectionState(): ConnectionState {
-        if (!this.ws) return ConnectionState.DISCONNECTED;
-
-        switch (this.ws.readyState) {
-            case WebSocket.CONNECTING:
-                return this.retryAttempts > 0 ? ConnectionState.RECONNECTING : ConnectionState.CONNECTING;
-            case WebSocket.OPEN:
-                return ConnectionState.CONNECTED;
-            case WebSocket.CLOSING:
-            case WebSocket.CLOSED:
-            default:
-                return ConnectionState.DISCONNECTED;
-        }
-    }
-
     getRetryInfo(): { attempts: number; maxRetries: number } {
         return {attempts: this.retryAttempts, maxRetries: this.maxRetries};
     }
 }
 
 export default function TaskDetail() {
+    const isM3u8Ready = useGlobalStore(s => s.isM3u8Ready);
     const {taskId = ''} = useParams();
-    const [status, setStatus] = useState<any>(null);
-    const [pipeline, setPipeline] = useState<any>(null);
+
     const [rtsp, setRtsp] = useState<string>('');
     const [testUrl, setTestUrl] = useState('');
 
@@ -205,32 +191,9 @@ export default function TaskDetail() {
     }, []);
 
     useEffect(() => {
-        let active = true;
-        const poll = async () => {
-            try {
-                const [s, p] = await Promise.all([
-                    getTaskStatus(taskId),
-                    getPipelineStatus(taskId),
-                ]);
-                if (!active) return;
-                setStatus(s);
-                setPipeline(p);
-            } catch {
-            }
-        };
-        poll();
-        const id = setInterval(poll, 3000);
-        return () => {
-            active = false;
-            clearInterval(id);
-        };
-    }, [taskId]);
-
-    useEffect(() => {
-        getAnnotationRtsp(taskId)
+        api.getAnnotationRtsp(taskId)
             .then((r) => setRtsp(r.processed_rtsp_url))
-            .catch(() => {
-            });
+            .catch(() => {});
     }, [taskId]);
 
     const wsUrl = useMemo(() => {
@@ -253,21 +216,6 @@ export default function TaskDetail() {
         setShowAllTracksSpeed(renderMode === 'all');
     }, [renderMode]);
 
-    // WebSocket 消息处理
-    const handleWebSocketMessage = useCallback((data: any) => {
-        setLatestFrameData(data);
-    }, []);
-
-    // WebSocket 状态变化处理
-    const handleWebSocketStateChange = useCallback((state: ConnectionState, error?: string) => {
-        setConnectionState(state);
-        setConnectionError(error || '');
-
-        if (wsManagerRef.current) {
-            setRetryInfo(wsManagerRef.current.getRetryInfo());
-        }
-    }, []);
-
     // 手动重连
     const manualReconnect = useCallback(() => {
         setLatestFrameData(null);
@@ -276,19 +224,27 @@ export default function TaskDetail() {
 
     // 共享WebSocket管理器初始化
     useEffect(() => {
+        if (!isM3u8Ready) return;
+        if(!wsUrl) return;
+
         wsManagerRef.current = new SharedWebSocketManager(
             wsUrl,
-            handleWebSocketMessage,
-            handleWebSocketStateChange
+            (data) => setLatestFrameData(data),
+            (state, error) => {
+                setConnectionState(state);
+                setConnectionError(error || '');
+                if (wsManagerRef.current) {
+                    setRetryInfo(wsManagerRef.current.getRetryInfo());
+                }
+            }
         );
-
         wsManagerRef.current.connect();
 
         return () => {
             wsManagerRef.current?.disconnect();
             wsManagerRef.current = null;
         };
-    }, [wsUrl, handleWebSocketMessage, handleWebSocketStateChange]);
+    }, [wsUrl, isM3u8Ready]);
 
     const handleDisplayIdsUpdate = (displayIds: DisplayIdInfo[]) => {
         setAvailableDisplayIds(displayIds);
@@ -310,20 +266,10 @@ export default function TaskDetail() {
             {/* 页面头部 */}
             <Group justify="space-between" align="center" mb="xl">
                 <Title order={2}>Task {taskId} - Dashboard</Title>
-                <Group>
-                    {status?.status && (
-                        <Badge
-                            size="lg"
-                            color={status?.status === 'completed' ? 'green' : 'yellow'}
-                        >
-                            {status?.status}
-                        </Badge>
-                    )}
-                    <Group gap="xs">
-                        <Switch label="detection"/>
-                        <Switch label="pose" defaultChecked/>
-                        <Switch label="ID"/>
-                    </Group>
+                <Group gap="xs">
+                    <Switch label="detection"/>
+                    <Switch label="pose" defaultChecked/>
+                    <Switch label="ID"/>
                 </Group>
             </Group>
 
@@ -459,10 +405,10 @@ export default function TaskDetail() {
                 borderRadius: '8px'
             }}>
                 <Text size="sm" c="dimmed">
-                    📊 Mode: {renderMode === 'single' ? 
+                    📊 Mode: {renderMode === 'single' ?
                         `Single (${effectiveDisplayId ? 
                             availableDisplayIds.find(d => d.id === effectiveDisplayId)?.label || 'Unknown'
-                            : 'None'})` 
+                            : 'None'})`
                         : 'All Players'}
                 </Text>
                 <Text size="sm" c="dimmed">

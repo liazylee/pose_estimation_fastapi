@@ -1,5 +1,7 @@
-import api from './client';
+import { api } from './http';
 import type { HealthResponse, UploadResponse, TaskStatus, StreamsResponse } from './types';
+
+export * from './http'
 
 export const getHealth = () => api.get<HealthResponse>('/health').then(r => r.data);
 export const getAIHealth = () => api.get('/api/ai/health').then(r => r.data);
