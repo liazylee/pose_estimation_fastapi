@@ -10,11 +10,11 @@ from datetime import datetime
 from pathlib import Path
 
 from config import UPLOAD_DIR, ALLOWED_VIDEO_EXTENSIONS, RTSP_BASE_URL, logger
-from dependencies import get_kafka_controller, get_rtsp_manager, get_ai_orchestrator
+from dependencies import get_kafka_controller, get_rtsp_manager, get_ai_orchestrator, get_mongodb_client
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException
 from fastapi.responses import JSONResponse, FileResponse
 from models import get_task_status_db, update_task_status
-from schemas import TaskResponse, TaskStatus
+from schemas import TaskResponse, TaskStatus, VideoUploadRecord
 
 from tasks import process_video_task
 
@@ -67,6 +67,7 @@ async def upload_video(
     rtsp_manager = get_rtsp_manager()
     ai_orchestrator = get_ai_orchestrator()
     task_status_db = get_task_status_db()
+    mongodb_client = get_mongodb_client()
 
     # Create Kafka topics
     if not kafka_controller.create_topics_for_task(task_id):
@@ -83,6 +84,31 @@ async def upload_video(
         error=None
     )
     update_task_status(task_id, task_status)
+    
+    # Save video upload record to MongoDB
+    try:
+        output_video_path = f"output_videos/annotated_{task_id}.mp4"
+        video_record = VideoUploadRecord(
+            task_id=task_id,
+            filename=file.filename,
+            file_path=str(file_path),
+            file_size=file_path.stat().st_size,
+            created_at=datetime.utcnow(),
+            status="initializing",
+            output_video_path=output_video_path,
+            stream_url=f"{RTSP_BASE_URL}/{task_id}"
+        )
+        
+        # Save to MongoDB asynchronously (don't fail upload if MongoDB fails)
+        save_success = await mongodb_client.save_video_record(video_record)
+        if save_success:
+            logger.info(f"Video upload record saved to MongoDB for task_id: {task_id}")
+        else:
+            logger.warning(f"Failed to save video upload record to MongoDB for task_id: {task_id}")
+            
+    except Exception as e:
+        logger.error(f"Error saving video record to MongoDB: {e}")
+        # Continue without failing the upload
 
     # Create RTSP stream from the uploaded video
     # try:
@@ -185,3 +211,46 @@ async def get_result(task_id: str):
             "stream_url": f"{RTSP_BASE_URL}/{task_id}"
         }
     )
+
+
+@router.get("/records/{task_id}")
+async def get_video_record(task_id: str):
+    """
+    Get video upload record by task_id from MongoDB.
+    
+    Args:
+        task_id: Unique task identifier
+        
+    Returns:
+        Video upload record information
+    """
+    mongodb_client = get_mongodb_client()
+    
+    record = await mongodb_client.get_video_record(task_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Video record not found")
+    
+    return record
+
+
+@router.get("/records")
+async def list_video_records(limit: int = 50, skip: int = 0):
+    """
+    List video upload records with pagination.
+    
+    Args:
+        limit: Maximum number of records to return (default: 50)
+        skip: Number of records to skip (default: 0)
+        
+    Returns:
+        List of video upload records
+    """
+    mongodb_client = get_mongodb_client()
+    
+    records = await mongodb_client.list_video_records(limit=limit, skip=skip)
+    return {
+        "records": records,
+        "count": len(records),
+        "limit": limit,
+        "skip": skip
+    }

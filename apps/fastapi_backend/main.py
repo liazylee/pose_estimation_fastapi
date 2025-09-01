@@ -11,7 +11,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import FileResponse
 
-from config import APP_TITLE, APP_VERSION, STATIC_DIR, CORS_SETTINGS, logger, FRONTEND_DIST_DIR
+from config import APP_TITLE, APP_VERSION, STATIC_DIR, CORS_SETTINGS, logger, FRONTEND_DIST_DIR, UPLOAD_DIR
 from dependencies import initialize_services, cleanup_services
 from routes.ai_services import router as ai_services_router
 # Import all route modules
@@ -50,6 +50,17 @@ app.add_middleware(CORSMiddleware, **CORS_SETTINGS)
 
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+# Mount video files for direct access
+app.mount("/media/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
+
+# Mount output videos from annotation service
+from pathlib import Path
+
+ANNOTATION_OUTPUT_DIR = Path(
+    "/home/stanley/jobs/python/AI/pose_estimation_fastapi/apps/annotation_service/output_videos")
+if ANNOTATION_OUTPUT_DIR.exists():
+    app.mount("/media/outputs", StaticFiles(directory=str(ANNOTATION_OUTPUT_DIR)), name="outputs")
 
 # Mount SPA (if built)
 frontend_built = FRONTEND_DIST_DIR.exists() and (FRONTEND_DIST_DIR / "index.html").exists()
