@@ -40,11 +40,17 @@ class KafkaInput(ABC):
         self.consumer_timeout_ms = config.get('consumer_timeout_ms', 10)
         self.enable_auto_commit = config.get('enable_auto_commit', True)
 
-        # Asyncio constructs
-        self.message_queue: Queue = Queue(maxsize=config.get('message_queue_size', 1000))
-        # self.consumer = KafkaConsumer()
+        # Enhanced asyncio constructs with backpressure support
+        queue_size = config.get('message_queue_size', 1000)
+        self.message_queue: Queue = Queue(maxsize=queue_size)
         self._executor = ThreadPoolExecutor(max_workers=config.get('max_workers', 1),
                                             thread_name_prefix=f"kafka_{self.group_id}")
+
+        # Backpressure management
+        self._backpressure_threshold = int(queue_size * 0.8)  # 80% threshold
+        self._backpressure_active = False
+        self._backpressure_delay_ms = config.get('backpressure_delay_ms', 100)
+        self._queue_high_watermark = int(queue_size * 0.9)  # 90% high watermark
         self._loop: asyncio.AbstractEventLoop | None = None
 
         # Kafka consumer
@@ -112,6 +118,9 @@ class KafkaInput(ABC):
             message_str = record.value.decode('utf-8')
             message = json.loads(message_str)
             if isinstance(message, dict) and 'frame_id' in message:
+                # Quick check: if queue is too full, apply light backpressure
+                if self.message_queue.qsize() >= self._backpressure_threshold:
+                    await asyncio.sleep(0.01)  # Light delay
                 await self.message_queue.put(message)
                 return
         except(UnicodeDecodeError, json.JSONDecodeError):
@@ -225,6 +234,9 @@ class KafkaInput(ABC):
             }
 
             res.append(frame_id)
+            # Light backpressure check only when queue is very full
+            if self.message_queue.qsize() >= self._queue_high_watermark:
+                await asyncio.sleep(0.001)  # Minimal delay
             await self.message_queue.put(message)
         if len(res) != total_frames:
             logger.error(f'the frame is not ordered')
@@ -243,7 +255,7 @@ class KafkaInput(ABC):
             return message
         except asyncio.TimeoutError:
             logger.warning("Timeout waiting for Kafka message")
-            raise
+            return None
         except asyncio.CancelledError:
             logger.info("Kafka input read_data task cancelled")
             raise
@@ -253,6 +265,32 @@ class KafkaInput(ABC):
         finally:
             if message is not None:
                 self.message_queue.task_done()
+
+    async def _handle_backpressure(self):
+        """Handle backpressure when queue is getting full."""
+        current_size = self.message_queue.qsize()
+
+        if current_size >= self._queue_high_watermark:
+            if not self._backpressure_active:
+                self._backpressure_active = True
+                logger.warning(
+                    f"[BACKPRESSURE] Queue pressure HIGH: {current_size}/{self.message_queue.maxsize}. Activating backpressure.")
+
+            # Apply exponential backoff based on queue fullness
+            pressure_ratio = current_size / self.message_queue.maxsize
+            delay_ms = self._backpressure_delay_ms * (1 + pressure_ratio)
+            await asyncio.sleep(delay_ms / 1000.0)
+
+        elif current_size < self._backpressure_threshold and self._backpressure_active:
+            self._backpressure_active = False
+            logger.info(
+                f"[BACKPRESSURE] Queue pressure NORMAL: {current_size}/{self.message_queue.maxsize}. Deactivating backpressure.")
+
+    async def _handle_backpressure_for_frame_queue(self):
+        """Lightweight backpressure check for frame queuing."""
+        if self.message_queue.qsize() >= self._queue_high_watermark:
+            # Small delay to prevent overwhelming the queue
+            await asyncio.sleep(0.01)
 
     async def cleanup(self):
         """Clean up Kafka resources."""
@@ -283,3 +321,19 @@ class KafkaInput(ABC):
                 break
 
         logger.info("Kafka input cleaned up")
+
+    def get_queue_status(self) -> Dict[str, Any]:
+        """Get current queue status for monitoring."""
+        current_size = self.message_queue.qsize()
+        max_size = self.message_queue.maxsize
+
+        return {
+            'current_size': current_size,
+            'max_size': max_size,
+            'usage_percent': (current_size / max_size) * 100 if max_size > 0 else 0,
+            'backpressure_active': self._backpressure_active,
+            'backpressure_threshold': self._backpressure_threshold,
+            'high_watermark': self._queue_high_watermark,
+            'topic': self.topic,
+            'group_id': self.group_id
+        }

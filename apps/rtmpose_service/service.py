@@ -75,11 +75,21 @@ class RTMPoseService(BaseAIService):
     def _get_kafka_input_config(self, topic_suffix: str, group_suffix: str) -> Dict[str, Any]:
         """Get Kafka input configuration for a specific topic."""
         kafka_config = self.config.get('kafka', {})
+        consumer_config = kafka_config.get('consumer', {})
 
         return {
-            **kafka_config,
+            'bootstrap_servers': kafka_config.get('bootstrap_servers', 'localhost:9092'),
             'topic': f"{topic_suffix}_{self.task_id}",
             'group_id': f"{group_suffix}_{self.task_id}",
+            # Consumer settings
+            'auto_offset_reset': consumer_config.get('auto_offset_reset', 'earliest'),
+            'max_poll_records': consumer_config.get('max_poll_records', 1),
+            'consumer_timeout_ms': consumer_config.get('consumer_timeout_ms', 1000),
+            'enable_auto_commit': consumer_config.get('enable_auto_commit', True),
+            # New optimization parameters
+            'message_queue_size': consumer_config.get('message_queue_size', 1000),
+            'backpressure_delay_ms': consumer_config.get('backpressure_delay_ms', 100),
+            'max_workers': consumer_config.get('max_workers', 1)
         }
 
     def _get_kafka_output_config(self) -> Dict[str, Any]:

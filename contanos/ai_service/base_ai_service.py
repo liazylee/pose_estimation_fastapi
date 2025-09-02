@@ -126,6 +126,19 @@ class BaseAIService(ABC):
             'max_restart_attempts': global_config.get('max_restart_attempts', 3),
             'restart_cooldown': global_config.get('restart_cooldown', 3)
         }
+    
+    def _get_sync_config(self) -> Dict[str, Any]:
+        """Get synchronization configuration for MultiInputInterface."""
+        service_config = self.config.get(self.get_service_config_key(), {})
+        sync_config = service_config.get('input_sync_config', {})
+        
+        # Default values optimized for large video processing
+        return {
+            'frame_timeout_sec': sync_config.get('frame_timeout_sec', 30),
+            'sync_mode': sync_config.get('sync_mode', 'adaptive'), 
+            'max_memory_mb': sync_config.get('max_memory_mb', 512),
+            'enable_backpressure_monitoring': sync_config.get('enable_backpressure_monitoring', True)
+        }
 
     async def _initialize_interfaces(self):
         """Initialize input and output interfaces."""
@@ -133,7 +146,7 @@ class BaseAIService(ABC):
         input_interfaces = self.create_input_interfaces()
         self.input_interfaces = input_interfaces
 
-        # Create MultiInputInterface
+        # Create MultiInputInterface with default settings (恢复原始逻辑)
         self.multi_input_interface = MultiInputInterface(interfaces=input_interfaces)
         await self.multi_input_interface.initialize()
 

@@ -42,8 +42,11 @@ kafka:
   consumer:
     auto_offset_reset: "latest"
     max_poll_records: 1
-    consumer_timeout_ms: 10
+    consumer_timeout_ms: 1000  # 从10ms增加到1秒，避免频繁超时
     enable_auto_commit: true
+    # 保守的队列优化
+    message_queue_size: 1500   # 适度增加
+    max_workers: 1             # 保持简单
   # Queue length limits
   queue_limits:
     yolox_output: 50
@@ -159,8 +162,6 @@ annotation:
   devices: "cpu"
   # Debug output directory for saving debug frames
   debug_output_dir: "debug_frames"
-  # Frame synchronization timeout (seconds) - how long to wait for all inputs
-  frame_timeout_sec: 20
   # Input configuration (multi-input) - mixed Kafka and RTSP
   input:
     consumer:

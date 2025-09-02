@@ -108,7 +108,7 @@ class YOLOXService(BaseAIService):
         global_kafka = self.config.get('kafka', {})
         consumer_settings = global_kafka.get('consumer', {})
 
-        # Merge configurations
+        # Merge configurations including new optimization parameters
         config = {
             'bootstrap_servers': kafka_config.get('bootstrap_servers'),
             'topic': kafka_config.get('topic'),
@@ -116,7 +116,11 @@ class YOLOXService(BaseAIService):
             'auto_offset_reset': consumer_settings.get('auto_offset_reset', 'earliest'),
             'max_poll_records': consumer_settings.get('max_poll_records', 1),
             'consumer_timeout_ms': consumer_settings.get('consumer_timeout_ms', 1000),
-            'enable_auto_commit': consumer_settings.get('enable_auto_commit', True)
+            'enable_auto_commit': consumer_settings.get('enable_auto_commit', True),
+            # New optimization parameters
+            'message_queue_size': consumer_settings.get('message_queue_size', 1000),
+            'backpressure_delay_ms': consumer_settings.get('backpressure_delay_ms', 100),
+            'max_workers': consumer_settings.get('max_workers', 1)
         }
 
         return config

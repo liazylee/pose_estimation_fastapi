@@ -6,7 +6,7 @@ Updated to use contanos framework with dynamic task_id support.
 import logging
 import os
 import sys
-from typing import List
+from typing import List, Dict, Any
 
 from contanos.ai_service import BaseAIService
 
@@ -67,6 +67,10 @@ class ByteTrackService(BaseAIService):
                         'max_poll_records': consumer_settings.get('max_poll_records', 1),
                         'consumer_timeout_ms': consumer_settings.get('consumer_timeout_ms', 1000),
                         'enable_auto_commit': consumer_settings.get('enable_auto_commit', True),
+                        # New optimization parameters
+                        'message_queue_size': consumer_settings.get('message_queue_size', 1000),
+                        'backpressure_delay_ms': consumer_settings.get('backpressure_delay_ms', 100),
+                        'max_workers': consumer_settings.get('max_workers', 1),
                         'input_name': input_name  # Add input name for identification
                     }
 
@@ -179,6 +183,17 @@ class ByteTrackService(BaseAIService):
         }
 
         return config
+
+    def _get_processing_config(self) -> Dict[str, Any]:
+        """Get common processing configuration."""
+        global_config = self.config.get('global', {})
+
+        return {
+            'workers_per_device': 1,
+            'health_check_interval': global_config.get('health_check_interval', 5.0),
+            'max_restart_attempts': global_config.get('max_restart_attempts', 3),
+            'restart_cooldown': global_config.get('restart_cooldown', 3)
+        }
 
 
 def parse_args():
