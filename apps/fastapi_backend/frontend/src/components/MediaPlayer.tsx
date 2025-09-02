@@ -6,7 +6,6 @@ import { streamApi } from '@/api/http';
 
 type Props = {
     path: string; // e.g. "outstream_<task_id>"
-    onSizeReady?: (width: number, height: number) => void;
 };
 
 type StreamType = 'hls' | 'webrtc';
@@ -14,13 +13,17 @@ type StreamType = 'hls' | 'webrtc';
 const hlsHost = import.meta.env.VITE_API_HLS;
 const webrtcHost = import.meta.env.VITE_API_WEBRTC;
 
-export default function MediaPlayer({ path, onSizeReady }: Props) {
+export default function MediaPlayer({ path }: Props) {
     const videoRef = useRef<HTMLVideoElement | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [streamType, setStreamType] = useState<StreamType>('hls');
     const [isConnecting, setIsConnecting] = useState(false);
 
     const isM3u8Ready = useGlobalStore(s => s.isM3u8Ready);
+    const setM3u8Ready = useGlobalStore(s => s.setM3u8Ready);
+    const setAspectRatio = useGlobalStore(s => s.setAspectRatio);
+    const setVideoDuration = useGlobalStore(s => s.setVideoDuration);
+    const setVideoPaused= useGlobalStore(s => s.setVideoPaused);
 
     const hlsUrl = useMemo(() => `${hlsHost}/${path}/index.m3u8`, [path, hlsHost]);
     const webrtcApiUrl = useMemo(() => `${webrtcHost}/${path}/whep`, [path, webrtcHost]);
@@ -36,21 +39,6 @@ export default function MediaPlayer({ path, onSizeReady }: Props) {
             checkM3u8()
         }
     }, [path]);
-
-    // 通知外部尺寸准备完毕
-    useEffect(() => {
-        const video = videoRef.current;
-        if (!video) return;
-        const handleLoaded = () => {
-            if (video.videoWidth && video.videoHeight && typeof onSizeReady === 'function') {
-                onSizeReady(video.videoWidth, video.videoHeight);
-            }
-        };
-        video.addEventListener('loadedmetadata', handleLoaded);
-        return () => {
-            video.removeEventListener('loadedmetadata', handleLoaded);
-        };
-    }, [onSizeReady]);
 
     // WebRTC 播放逻辑 (MediaMTX WHEP)
     const setupWebRTC = async () => {
@@ -203,6 +191,28 @@ export default function MediaPlayer({ path, onSizeReady }: Props) {
         };
     }, [isM3u8Ready, streamType, path]);
 
+    // 视频加载后设置宽高比
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video || !setAspectRatio || !setVideoDuration) return;
+
+        const handleLoaded = () => {
+            if (video.videoWidth && video.videoHeight) {
+                const ratio = video.videoWidth / video.videoHeight;
+                setAspectRatio(ratio);
+            }
+
+            if (!isNaN(video.duration)) {
+                setVideoDuration(video.duration); // 设置视频总时长（单位：秒）
+            }
+        };
+
+        video.addEventListener('loadedmetadata', handleLoaded);
+        return () => {
+            video.removeEventListener('loadedmetadata', handleLoaded);
+        };
+    }, [setAspectRatio, setVideoDuration]);
+
     // WebRTC 逻辑不变
     useEffect(() => {
         if (streamType !== 'webrtc') return;
@@ -236,6 +246,30 @@ export default function MediaPlayer({ path, onSizeReady }: Props) {
         };
     }, [streamType, webrtcApiUrl]);
 
+    // 视频暂停播放状态同步
+    useEffect(() => {
+        const video = videoRef.current;
+        if (!video) return;
+
+        const handlePause = () => setVideoPaused(true);
+        const handlePlay = () => setVideoPaused(false);
+
+        video.addEventListener('pause', handlePause);
+        video.addEventListener('play', handlePlay);
+
+        return () => {
+            video.removeEventListener('pause', handlePause);
+            video.removeEventListener('play', handlePlay);
+        };
+    }, []);
+
+    // 卸载时清空 isM3u8Ready
+    useEffect(() => {
+        return () => {
+            setM3u8Ready(false);
+        };
+    }, []);
+
     return (
         <Stack>
             <Group>
@@ -262,7 +296,7 @@ export default function MediaPlayer({ path, onSizeReady }: Props) {
                 ref={videoRef}
                 playsInline
                 controls
-                style={{width: '100%', background: '#000', minHeight: 300}}
+                style={{ width: '100%', height: 'auto', display: 'block', borderRadius: '4px' }}
             />
 
             <Group>

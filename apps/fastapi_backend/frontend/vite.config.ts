@@ -17,7 +17,7 @@ export default defineConfig(({ mode }) => {
             port: 5173,
             host: true,
             proxy: {
-                '^/(api|upload|status|result|streams|health)': {
+                '^/(api|upload|status|result|streams|health|records|media)': {
                     target: baseHost,
                     changeOrigin: true,
                 },

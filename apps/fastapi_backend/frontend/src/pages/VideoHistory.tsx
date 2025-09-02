@@ -1,14 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { 
-  Stack, 
-  Table, 
-  Button, 
-  Badge, 
-  Text, 
-  Group, 
-  Pagination, 
-  Card, 
-  Loader, 
+import {
+  Stack,
+  Table,
+  Button,
+  Badge,
+  Text,
+  Group,
+  Pagination,
+  Card,
+  Loader,
   Center,
   ActionIcon,
   Title,
@@ -17,8 +17,8 @@ import {
 } from '@mantine/core';
 import { Play, Clock, File } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { getVideoRecords } from '../api';
-import type { VideoRecord } from '../api/types';
+import * as api from '@/api';
+import type { VideoRecord } from '@/api/types';
 import { notifications } from '@mantine/notifications';
 
 
@@ -33,7 +33,7 @@ export default function VideoHistory() {
   const loadRecords = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await getVideoRecords(pageSize, (currentPage - 1) * pageSize);
+      const response = await api.getVideoRecords(pageSize, (currentPage - 1) * pageSize);
       setRecords(response.records);
       setTotal(response.count);
     } catch (error) {
@@ -89,9 +89,9 @@ export default function VideoHistory() {
       });
       return;
     }
-    
-    navigate(`/video-analysis/${record.task_id}`, { 
-      state: { record } 
+
+    navigate(`/video-analysis/${record.task_id}`, {
+      state: { record }
     });
   };
 

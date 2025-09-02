@@ -1,6 +1,6 @@
-import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {useParams} from 'react-router-dom';
-import {Alert, Badge, Card, Container, Group, SimpleGrid, Stack, Switch, Text, TextInput, Title} from '@mantine/core';
+import {Alert, Card, Container, Group, Stack, Switch, Text, Title} from '@mantine/core';
 import * as api from '@/api';
 import MediaPlayer from '@/components/MediaPlayer';
 import VideoLikePoseCanvas2D from "@/components/VideoLikePoseCanvas2D";
@@ -17,15 +17,6 @@ interface DisplayIdInfo {
     fallbackTrackId: number;
 }
 
-// WebSocket 连接状态
-enum ConnectionState {
-    DISCONNECTED = 'disconnected',
-    CONNECTING = 'connecting',
-    CONNECTED = 'connected',
-    RECONNECTING = 'reconnecting',
-    ERROR = 'error'
-}
-
 // 共享的WebSocket管理器
 class SharedWebSocketManager {
     private wsUrl: string;
@@ -38,16 +29,13 @@ class SharedWebSocketManager {
     private isManuallyDisconnected = false;
 
     private onMessage: (data: any) => void;
-    private onStateChange: (state: ConnectionState, error?: string) => void;
 
     constructor(
         wsUrl: string,
         onMessage: (data: any) => void,
-        onStateChange: (state: ConnectionState, error?: string) => void
     ) {
         this.wsUrl = wsUrl;
         this.onMessage = onMessage;
-        this.onStateChange = onStateChange;
     }
 
     connect(): void {
@@ -56,8 +44,6 @@ class SharedWebSocketManager {
         }
 
         this.isManuallyDisconnected = false;
-        const isReconnect = this.retryAttempts > 0;
-        this.onStateChange(isReconnect ? ConnectionState.RECONNECTING : ConnectionState.CONNECTING);
 
         try {
             this.ws = new WebSocket(this.wsUrl);
@@ -65,7 +51,6 @@ class SharedWebSocketManager {
             this.ws.onopen = () => {
                 console.log('Shared WebSocket connected');
                 this.retryAttempts = 0;
-                this.onStateChange(ConnectionState.CONNECTED);
             };
 
             this.ws.onmessage = (evt) => {
@@ -83,26 +68,20 @@ class SharedWebSocketManager {
 
                 if (!this.isManuallyDisconnected) {
                     this.scheduleReconnect();
-                } else {
-                    this.onStateChange(ConnectionState.DISCONNECTED);
                 }
             };
 
             this.ws.onerror = (evt) => {
                 console.error('Shared WebSocket error:', evt);
-                this.onStateChange(ConnectionState.ERROR, 'Connection failed');
             };
-
         } catch (error) {
             console.error('Failed to create shared WebSocket:', error);
-            this.onStateChange(ConnectionState.ERROR, 'Failed to create connection');
             this.scheduleReconnect();
         }
     }
 
     private scheduleReconnect(): void {
         if (this.isManuallyDisconnected || this.retryAttempts >= this.maxRetries) {
-            this.onStateChange(ConnectionState.ERROR, `Max retries (${this.maxRetries}) reached`);
             return;
         }
 
@@ -132,18 +111,12 @@ class SharedWebSocketManager {
             this.ws.close();
             this.ws = null;
         }
-
-        this.onStateChange(ConnectionState.DISCONNECTED);
     }
 
     manualReconnect(): void {
         this.retryAttempts = 0;
         this.disconnect();
         setTimeout(() => this.connect(), 100);
-    }
-
-    getRetryInfo(): { attempts: number; maxRetries: number } {
-        return {attempts: this.retryAttempts, maxRetries: this.maxRetries};
     }
 }
 
@@ -152,43 +125,17 @@ export default function TaskDetail() {
     const {taskId = ''} = useParams();
 
     const [rtsp, setRtsp] = useState<string>('');
-    const [testUrl, setTestUrl] = useState('');
-
-    const containerRef = useRef<HTMLDivElement | null>(null);
-    const [size, setSize] = useState({w: 1280, h: 720});
-    const [videoSize, setVideoSize] = useState({w: 1280, h: 720});
 
     // Display ID 选择相关状态 - 全局共享状态
     const [selectedDisplayId, setSelectedDisplayId] = useState<string | null>(null);
     const [availableDisplayIds, setAvailableDisplayIds] = useState<DisplayIdInfo[]>([]);
     const [renderMode, setRenderMode] = useState<'all' | 'single'>('single');
 
-    // 速度图表状态
-    const [showAllTracksSpeed, setShowAllTracksSpeed] = useState<boolean>(false);
-
     // 共享WebSocket状态
     const wsManagerRef = useRef<SharedWebSocketManager | null>(null);
-    const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
-    const [connectionError, setConnectionError] = useState<string>('');
-    const [retryInfo, setRetryInfo] = useState({attempts: 0, maxRetries: 10});
 
     // WebSocket数据状态
     const [latestFrameData, setLatestFrameData] = useState<any>(null);
-
-    useEffect(() => {
-        if (!containerRef.current) return;
-        const el = containerRef.current;
-        const ro = new ResizeObserver(entries => {
-            for (const entry of entries) {
-                // 垂直布局下使用更大的宽度，充分利用空间
-                const cw = Math.max(900, Math.floor(entry.contentRect.width * 0.9));
-                const ch = Math.floor((cw * 9) / 16);
-                setSize({w: cw, h: ch});
-            }
-        });
-        ro.observe(el);
-        return () => ro.disconnect();
-    }, []);
 
     useEffect(() => {
         api.getAnnotationRtsp(taskId)
@@ -211,11 +158,6 @@ export default function TaskDetail() {
         }
     }, [renderMode, availableDisplayIds, selectedDisplayId]);
 
-    // 同步速度图表的显示模式
-    useEffect(() => {
-        setShowAllTracksSpeed(renderMode === 'all');
-    }, [renderMode]);
-
     // 手动重连
     const manualReconnect = useCallback(() => {
         setLatestFrameData(null);
@@ -229,14 +171,7 @@ export default function TaskDetail() {
 
         wsManagerRef.current = new SharedWebSocketManager(
             wsUrl,
-            (data) => setLatestFrameData(data),
-            (state, error) => {
-                setConnectionState(state);
-                setConnectionError(error || '');
-                if (wsManagerRef.current) {
-                    setRetryInfo(wsManagerRef.current.getRetryInfo());
-                }
-            }
+            (data) => setLatestFrameData(data)
         );
         wsManagerRef.current.connect();
 
@@ -273,69 +208,14 @@ export default function TaskDetail() {
                 </Group>
             </Group>
 
-            {/* 主要控制面板 */}
-            <Card withBorder mb="lg" p="lg">
-                <Group justify="space-between" align="center" mb="md">
-                    <Text fw={600} size="lg">🎛️ Control Panel</Text>
-                    <Switch
-                        label="Single Track Mode"
-                        checked={renderMode === 'single'}
-                        onChange={(e) => setRenderMode(e.currentTarget.checked ? 'single' : 'all')}
-                        color="green"
-                        size="md"
-                    />
-                </Group>
-
-                {/* Track 选择器 - 只在单人模式显示 */}
-                {renderMode === 'single' && (
-                    <TrackSelector
-                        availableDisplayIds={availableDisplayIds}
-                        selectedDisplayId={selectedDisplayId}
-                        onDisplayIdChange={setSelectedDisplayId}
-                        showStats={true}
-                    />
-                )}
-
-                {/* 性能提示 */}
-                {renderMode === 'single' && (
-                    <Alert color="green" variant="light" mt="md">
-                        🚀 Single track mode enabled for better performance
-                    </Alert>
-                )}
-            </Card>
-
             {/* 主要内容区域 - 垂直堆叠布局 */}
             <Stack gap="xl">
                 {/* 上面：处理后的视频 */}
                 <Card withBorder p="lg">
                     <Stack gap="md">
-                        <Group justify="space-between" align="center">
-                            <Text fw={600} size="lg">📹 Processed Video Stream</Text>
-                            <Badge variant="outline" size="lg">RTSP</Badge>
-                        </Group>
-                        <div style={{width: '100%', display: 'flex', justifyContent: 'center'}} ref={containerRef}>
-                            <MediaPlayer
-                                path={(rtsp || '').replace('rtsp://localhost:8554/', '') || testUrl || ''}
-                                onSizeReady={(w, h) => {
-                                    console.log('Video size:', w, h);
-                                    setVideoSize({w, h});
-                                    // 垂直布局下使用全宽度，提供更好的观看体验
-                                    const containerWidth = Math.max(1000, Math.floor(containerRef.current?.clientWidth * 0.85 || 1200));
-                                    const containerHeight = Math.floor((containerWidth * 9) / 16);
-                                    setSize({w: containerWidth, h: containerHeight});
-                                }}
-                            />
-                        </div>
-                        <Group justify="space-between" align="center" mt="xs">
-                            <Text size="sm" c="dimmed">RTSP: {rtsp || 'not available'}</Text>
-                            <TextInput
-                                placeholder="test url (optional)"
-                                value={testUrl}
-                                onChange={(e) => setTestUrl(e.currentTarget.value)}
-                                size="sm"
-                                style={{maxWidth: '300px'}}
-                            />
-                        </Group>
+                        <Text fw={600} size="lg">📹 Processed Video Stream</Text>
+                        <MediaPlayer path={(rtsp || '').replace('rtsp://localhost:8554/', '') || ''} />
+                        <Text size="sm" c="dimmed">RTSP: {rtsp || 'not available'}</Text>
                     </Stack>
                 </Card>
 
@@ -343,84 +223,47 @@ export default function TaskDetail() {
                 <Card withBorder p="lg">
                     <Stack gap="md">
                         <Group justify="space-between" align="center">
-                            <Text fw={600} size="lg">🎯 Pose Tracking</Text>
-                            <Badge variant="outline" size="lg">WebSocket</Badge>
-                        </Group>
-                        <div style={{width: '100%', display: 'flex', justifyContent: 'center'}}>
-                            <VideoLikePoseCanvas2D
-                                frameData={latestFrameData}
-                                connectionState={connectionState}
-                                connectionError={connectionError}
-                                retryInfo={retryInfo}
-                                onManualReconnect={manualReconnect}
-                                width={size.w}
-                                height={size.h}
-                                videoWidth={videoSize.w}
-                                videoHeight={videoSize.h}
-                                selectedDisplayId={effectiveDisplayId}
-                                showSkeleton
-                                showJoints
-                                showBBoxes
-                                showDebug={false}
-                                targetFps={25}
-                                bufferSize={30}
-                                onDisplayIdsUpdate={handleDisplayIdsUpdate}
-                                jerseyConfidenceThreshold={0.7}
+                            {/* 性能提示 */}
+                            <Alert color="green" variant="light">
+                                🚀 Single track mode enabled for better performance
+                            </Alert>
+                            <Switch
+                                label="Single Track Mode"
+                                checked={renderMode === 'single'}
+                                onChange={(e) => setRenderMode(e.currentTarget.checked ? 'single' : 'all')}
+                                color="green"
+                                size="md"
                             />
-                        </div>
-                    </Stack>
-                </Card>
-
-                {/* 下面：速度图表 */}
-                <Card withBorder p="lg">
-                    <Stack gap="md">
-                        <Group justify="space-between" align="center">
-                            <Text fw={600} size="lg">📊 Speed Chart</Text>
-                            <Badge variant="outline" size="lg">Real-time</Badge>
                         </Group>
+
+                        {/* Track 选择器 - 只在单人模式显示 */}
+                        {renderMode === 'single' && (
+                            <TrackSelector
+                                availableDisplayIds={availableDisplayIds}
+                                selectedDisplayId={selectedDisplayId}
+                                onDisplayIdChange={setSelectedDisplayId}
+                            />
+                        )}
+
+                        <Text fw={600} size="lg" mt='lg'>🎯 Pose Tracking</Text>
+
+                        <VideoLikePoseCanvas2D
+                            frameData={latestFrameData}
+                            onManualReconnect={manualReconnect}
+                            selectedDisplayId={effectiveDisplayId}
+                            onDisplayIdsUpdate={handleDisplayIdsUpdate}
+                        />
+
+                        {/* 下面：速度图表 */}
+                        <Text fw={600} size="lg" mt="xl">📊 Speed Chart</Text>
                         <SpeedChart
                             frameData={latestFrameData}
-                            connectionState={connectionState}
-                            connectionError={connectionError}
-                            retryInfo={retryInfo}
-                            onManualReconnect={manualReconnect}
                             selectedDisplayId={selectedDisplayId}
-                            onDisplayIdChange={setSelectedDisplayId}
-                            showAllTracks={showAllTracksSpeed}
-                            onShowAllTracksChange={(showAll) => {
-                                setShowAllTracksSpeed(showAll);
-                                setRenderMode(showAll ? 'all' : 'single');
-                            }}
-                            maxDataPoints={150}
-                            height={300}
-                            jerseyConfidenceThreshold={0.7}
+                            showAllTracks={renderMode === 'all'}
                         />
                     </Stack>
                 </Card>
             </Stack>
-
-            {/* 状态信息 */}
-            <Group gap="md" justify="center" mt="lg" p="md" style={{
-                backgroundColor: '#f8f9fa',
-                borderRadius: '8px'
-            }}>
-                <Text size="sm" c="dimmed">
-                    📊 Mode: {renderMode === 'single' ?
-                        `Single (${effectiveDisplayId ? 
-                            availableDisplayIds.find(d => d.id === effectiveDisplayId)?.label || 'Unknown'
-                            : 'None'})`
-                        : 'All Players'}
-                </Text>
-                <Text size="sm" c="dimmed">
-                    👥 Available players: {availableDisplayIds.length} ({availableDisplayIds.filter(d => d.type === 'jersey').length} jerseys, {availableDisplayIds.filter(d => d.type === 'track').length} tracks)
-                </Text>
-                <Text size="sm" c="dimmed">
-                    📐 Canvas: {size.w}×{size.h}
-                </Text>
-                <Text size="sm" c="dimmed">
-                    🎥 Video: {videoSize.w}×{videoSize.h}
-                </Text>
-            </Group>
         </Container>
     );
 }

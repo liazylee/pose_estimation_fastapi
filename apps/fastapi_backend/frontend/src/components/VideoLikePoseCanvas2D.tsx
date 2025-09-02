@@ -1,6 +1,7 @@
 // VideoLikePoseCanvas2D.tsx - 模拟视频播放效果
 import React, {useCallback, useEffect, useRef, useState} from "react";
-import { getDisplayId, getDisplayIdColor, extractDisplayIds, PersonData } from '../utils/displayId';
+import { getDisplayId, getDisplayIdColor, extractDisplayIds, PersonData } from '@/utils/displayId';
+import { useGlobalStore } from '@/store/global';
 
 interface DisplayIdInfo {
     id: string;
@@ -13,34 +14,14 @@ interface DisplayIdInfo {
 
 type PoseCanvasProps = {
     frameData: any; // WebSocket数据从父组件传入
-    connectionState: ConnectionState;
-    connectionError: string;
-    retryInfo: { attempts: number; maxRetries: number };
     onManualReconnect: () => void;
-    width: number;
-    height: number;
-    videoWidth?: number;  // 视频真实宽度
-    videoHeight?: number; // 视频真实高度
     selectedDisplayId?: string | null; // Changed from selectedTrackId
-    showSkeleton?: boolean;
-    showJoints?: boolean;
-    showBBoxes?: boolean;
     limbColorMode?: "python" | "track";
-    showDebug?: boolean;
     targetFps?: number; // 目标播放帧率，默认25fps
     bufferSize?: number; // 缓冲区大小，默认50帧
     onDisplayIdsUpdate?: (displayIds: DisplayIdInfo[]) => void; // Changed from onTrackIdsUpdate
     jerseyConfidenceThreshold?: number;
 };
-
-// WebSocket 连接状态
-enum ConnectionState {
-    DISCONNECTED = 'disconnected',
-    CONNECTING = 'connecting',
-    CONNECTED = 'connected',
-    RECONNECTING = 'reconnecting',
-    ERROR = 'error'
-}
 
 // 帧数据结构
 interface FrameData {
@@ -95,7 +76,6 @@ class FrameBuffer {
 class PlaybackController {
     private targetInterval: number;
     private lastPlayTime = 0;
-    private isPlaying = true;
 
     constructor(targetFps: number) {
         this.targetInterval = 1000 / targetFps;
@@ -105,28 +85,15 @@ class PlaybackController {
         const now = performance.now();
         if (now - this.lastPlayTime >= this.targetInterval) {
             this.lastPlayTime = now;
-            return this.isPlaying;
+            return true;
         }
         return false;
-    }
-
-    play(): void {
-        this.isPlaying = true;
-    }
-
-    pause(): void {
-        this.isPlaying = false;
     }
 
     setFps(fps: number): void {
         this.targetInterval = 1000 / fps;
     }
-
-    isActive(): boolean {
-        return this.isPlaying;
-    }
 }
-
 
 const PART_CONNECTIONS: Record<string, [number, number][]> = {
     head: [[0, 1], [0, 2], [1, 3], [2, 4]],
@@ -161,7 +128,7 @@ const JOINT_PART: Record<number, string> = (() => {
 const DISPLAY_COLORS = [
     "#00C853", // Sports green
     "#FF6F00", // Orange
-    "#2196F3", // Blue  
+    "#2196F3", // Blue
     "#E91E63", // Pink
     "#9C27B0", // Purple
     "#FF9800", // Amber
@@ -173,36 +140,32 @@ const DISPLAY_COLORS = [
 
 export default function VideoLikePoseCanvas2D({
                                                   frameData,
-                                                  connectionState,
-                                                  connectionError,
-                                                  retryInfo,
                                                   onManualReconnect,
-                                                  width,
-                                                  height,
-                                                  videoWidth = width,
-                                                  videoHeight = height,
                                                   selectedDisplayId = null,
-                                                  showSkeleton = true,
-                                                  showJoints = true,
-                                                  showBBoxes = true,
                                                   limbColorMode = "python",
-                                                  showDebug = false,
                                                   targetFps = 25, // 默认25fps播放
-                                                  bufferSize = 50,
+                                                  bufferSize = 30,
                                                   onDisplayIdsUpdate,
                                                   jerseyConfidenceThreshold = 0.7
                                               }: PoseCanvasProps) {
+    // 视频的宽高比，根据这个比例来设置Canvas
+    const aspectRatio = useGlobalStore(s => s.aspectRatio);
+
+    // 流视频是否已暂停
+    const isVideoPaused = useGlobalStore(s => s.isVideoPaused);
+
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const [canvasSize, setCanvasSize] = useState({ width: 640, height: 360 }); // 默认初始值
+
     const animationRef = useRef<number | null>(null);
 
     // 帧缓冲和播放控制
     const frameBuffer = useRef(new FrameBuffer(bufferSize));
     const playbackController = useRef(new PlaybackController(targetFps));
 
-    const [isPlaying, setIsPlaying] = useState(true);
     const [bufferLevel, setBufferLevel] = useState(0);
     const [playbackFps, setPlaybackFps] = useState(targetFps);
-    const [currentFrame, setCurrentFrame] = useState<FrameData | null>(null);
     const [availableDisplayIds, setAvailableDisplayIds] = useState<DisplayIdInfo[]>([]);
 
     // 统计信息
@@ -215,14 +178,37 @@ export default function VideoLikePoseCanvas2D({
 
     const fpsCounterRef = useRef({frames: 0, lastTime: performance.now()});
 
-    // 坐标转换函数：从视频坐标系转换到Canvas坐标系
+    // 自动根据容器宽度设置 canvas 宽高
+    useEffect(() => {
+        if (!containerRef.current) return;
+
+        const observer = new ResizeObserver(entries => {
+            for (const entry of entries) {
+                const width = entry.contentRect.width;
+                const height = width / aspectRatio;
+                setCanvasSize({ width, height });
+            }
+        });
+
+        observer.observe(containerRef.current);
+
+        return () => observer.disconnect();
+    }, [aspectRatio]);
+
+    // 更新 canvas 元素的实际绘图分辨率（canvas.width / height）
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (canvas) {
+            canvas.width = canvasSize.width;
+            canvas.height = canvasSize.height;
+        }
+    }, [canvasSize]);
+
     const transformCoordinate = useCallback((x: number, y: number): [number, number] => {
-        // 计算缩放比例
-        const scaleX = width / videoWidth;
-        const scaleY = height / videoHeight;
-        
+        const scaleX = canvasSize.width / canvasSize.width; // 通常为 1
+        const scaleY = canvasSize.height / canvasSize.height;
         return [x * scaleX, y * scaleY];
-    }, [width, height, videoWidth, videoHeight]);
+    }, [canvasSize]);
 
     // 绘制单帧
     const drawFrame = useCallback((frameData: FrameData) => {
@@ -234,7 +220,7 @@ export default function VideoLikePoseCanvas2D({
 
         // 清除画布
         ctx.fillStyle = '#000000';
-        ctx.fillRect(0, 0, width, height);
+        ctx.fillRect(0, 0, canvasSize.width, canvasSize.height);
 
         // 筛选要绘制的人员 - using display IDs
         let targetPersons = frameData.persons;
@@ -249,7 +235,7 @@ export default function VideoLikePoseCanvas2D({
         const currentDisplayIds = extractDisplayIds(frameData.persons, jerseyConfidenceThreshold);
         const displayIdStrings = currentDisplayIds.map(d => d.id).sort();
         const currentIdStrings = availableDisplayIds.map(d => d.id).sort();
-        
+
         if (JSON.stringify(displayIdStrings) !== JSON.stringify(currentIdStrings)) {
             setAvailableDisplayIds(currentDisplayIds);
             onDisplayIdsUpdate?.(currentDisplayIds);
@@ -258,12 +244,12 @@ export default function VideoLikePoseCanvas2D({
         // 绘制每个人 - using display IDs
         targetPersons.forEach((person: PersonData) => {
             const displayIdInfo = getDisplayId(person, jerseyConfidenceThreshold);
-            const joints: [number, number][] = (person.pose || []).map(joint => 
+            const joints: [number, number][] = (person.pose || []).map(joint =>
                 Array.isArray(joint) && joint.length >= 2 ? [joint[0], joint[1]] as [number, number] : [0, 0]
             );
             const bbox = person.bbox;
             const speed = typeof person.speed_kmh === "number" ? `${person.speed_kmh.toFixed(1)}km/h` : "";
-            const jerseyInfo = displayIdInfo.type === 'jersey' ? 
+            const jerseyInfo = displayIdInfo.type === 'jersey' ?
                 ` (${Math.round(displayIdInfo.confidence * 100)}%)` : "";
 
             const color = limbColorMode === "python" ? undefined : getDisplayIdColor(displayIdInfo.id, DISPLAY_COLORS);
@@ -277,43 +263,39 @@ export default function VideoLikePoseCanvas2D({
             const transformedJoints = joints.map(([x, y]) => transformCoordinate(x, y));
 
             // 绘制骨架
-            if (showSkeleton) {
-                ctx.lineWidth = 3;
+            ctx.lineWidth = 3;
 
-                for (const part in PART_CONNECTIONS) {
-                    const partColor = limbColorMode === "python" ? PART_COLORS[part] : color;
-                    ctx.strokeStyle = partColor || "#ffffff";
+            for (const part in PART_CONNECTIONS) {
+                const partColor = limbColorMode === "python" ? PART_COLORS[part] : color;
+                ctx.strokeStyle = partColor || "#ffffff";
 
-                    ctx.beginPath();
-                    for (const [a, b] of PART_CONNECTIONS[part]) {
-                        const A = transformedJoints[a];
-                        const B = transformedJoints[b];
-                        if (!A || !B) continue;
+                ctx.beginPath();
+                for (const [a, b] of PART_CONNECTIONS[part]) {
+                    const A = transformedJoints[a];
+                    const B = transformedJoints[b];
+                    if (!A || !B) continue;
 
-                        ctx.moveTo(Math.round(A[0]), Math.round(A[1]));
-                        ctx.lineTo(Math.round(B[0]), Math.round(B[1]));
-                    }
-                    ctx.stroke();
+                    ctx.moveTo(Math.round(A[0]), Math.round(A[1]));
+                    ctx.lineTo(Math.round(B[0]), Math.round(B[1]));
                 }
+                ctx.stroke();
             }
 
             // 绘制关键点
-            if (showJoints) {
-                for (let j = 0; j < transformedJoints.length; j++) {
-                    const [x, y] = transformedJoints[j] || [];
-                    if (x == null || y == null) continue;
+            for (let j = 0; j < transformedJoints.length; j++) {
+                const [x, y] = transformedJoints[j] || [];
+                if (x == null || y == null) continue;
 
-                    const partColor = limbColorMode === "python" ? PART_COLORS[JOINT_PART[j]] : color;
-                    ctx.fillStyle = partColor || "#b13434";
+                const partColor = limbColorMode === "python" ? PART_COLORS[JOINT_PART[j]] : color;
+                ctx.fillStyle = partColor || "#b13434";
 
-                    ctx.beginPath();
-                    ctx.arc(Math.round(x), Math.round(y), 4, 0, 2 * Math.PI);
-                    ctx.fill();
-                }
+                ctx.beginPath();
+                ctx.arc(Math.round(x), Math.round(y), 4, 0, 2 * Math.PI);
+                ctx.fill();
             }
 
             // 绘制边界框
-            if (showBBoxes && bbox && bbox.length === 4) {
+            if (bbox && bbox.length === 4) {
                 const [x1, y1, x2, y2] = bbox;
                 const [tx1, ty1] = transformCoordinate(x1, y1);
                 const [tx2, ty2] = transformCoordinate(x2, y2);
@@ -331,7 +313,7 @@ export default function VideoLikePoseCanvas2D({
                 const padding = 8;
 
                 // Different background for jersey vs track
-                ctx.fillStyle = displayIdInfo.type === 'jersey' ? 
+                ctx.fillStyle = displayIdInfo.type === 'jersey' ?
                     (color || "#00C853") : (color || "#ffffff");
                 ctx.globalAlpha = displayIdInfo.type === 'jersey' ? 0.9 : 0.8;
                 ctx.fillRect(tx1, Math.max(0, ty1 - 30), textWidth + padding * 2, 24);
@@ -352,21 +334,24 @@ export default function VideoLikePoseCanvas2D({
             counter.frames = 0;
             counter.lastTime = now;
         }
-
-    }, [width, height, videoWidth, videoHeight, selectedDisplayId, showSkeleton, showJoints, showBBoxes, limbColorMode, availableDisplayIds, onDisplayIdsUpdate, transformCoordinate, jerseyConfidenceThreshold]);
+    }, [selectedDisplayId, limbColorMode, availableDisplayIds, onDisplayIdsUpdate, transformCoordinate, jerseyConfidenceThreshold]);
 
     // 播放循环
     const playLoop = useCallback(() => {
+        if (isVideoPaused) {
+            animationRef.current = requestAnimationFrame(playLoop);
+            return;
+        }
+
         // 更新缓冲区状态
         const bufferSize = frameBuffer.current.getBufferSize();
         setBufferLevel(bufferSize);
 
         // 检查是否应该播放下一帧
-        if (playbackController.current.shouldPlayNextFrame()) {
+        if (!isVideoPaused && playbackController.current.shouldPlayNextFrame()) {
             if (frameBuffer.current.hasFrames()) {
                 const nextFrame = frameBuffer.current.getNextFrame();
                 if (nextFrame) {
-                    setCurrentFrame(nextFrame);
                     drawFrame(nextFrame);
                     setStats(prev => ({
                         ...prev,
@@ -380,48 +365,15 @@ export default function VideoLikePoseCanvas2D({
                     const ctx = canvas.getContext("2d");
                     if (ctx) {
                         ctx.fillStyle = '#111';
-                        ctx.fillRect(0, 0, width, height);
+                        ctx.fillRect(0, 0, canvasSize.width, canvasSize.height);
 
                         ctx.font = '16px sans-serif';
-                        ctx.textAlign = 'center';
-                        
-                        // 根据连接状态显示不同消息
-                        if (connectionState === ConnectionState.DISCONNECTED || connectionState === ConnectionState.ERROR) {
-                            ctx.fillStyle = '#ff4444';
-                            ctx.fillText('WebSocket Disconnected', width / 2, height / 2 - 10);
-                            ctx.fillStyle = '#666';
-                            ctx.font = '12px sans-serif';
-                            ctx.fillText('Click Retry button or check backend status', width / 2, height / 2 + 15);
-                        } else if (connectionState === ConnectionState.CONNECTING || connectionState === ConnectionState.RECONNECTING) {
-                            ctx.fillStyle = '#ffaa00';
-                            const message = connectionState === ConnectionState.RECONNECTING 
-                                ? `Reconnecting... (${retryInfo.attempts}/${retryInfo.maxRetries})`
-                                : 'Connecting...';
-                            ctx.fillText(message, width / 2, height / 2);
-                        } else {
-                            ctx.fillStyle = '#666';
-                            ctx.fillText('Buffering...', width / 2, height / 2);
-                        }
-                        
                         ctx.textAlign = 'left';
                     }
                 }
             }
         }
-
-        animationRef.current = requestAnimationFrame(playLoop);
-    }, [drawFrame, width, height, connectionState, retryInfo]);
-
-    // 播放控制函数
-    const togglePlayback = useCallback(() => {
-        if (isPlaying) {
-            playbackController.current.pause();
-            setIsPlaying(false);
-        } else {
-            playbackController.current.play();
-            setIsPlaying(true);
-        }
-    }, [isPlaying]);
+    }, [drawFrame,isVideoPaused]);
 
     const changeFps = useCallback((fps: number) => {
         playbackController.current.setFps(fps);
@@ -466,68 +418,8 @@ export default function VideoLikePoseCanvas2D({
         changeFps(targetFps);
     }, [targetFps, changeFps]);
 
-    // 获取连接状态显示信息
-    const getConnectionStatusInfo = () => {
-        switch (connectionState) {
-            case ConnectionState.CONNECTED:
-                return { icon: "🟢", text: "Connected", color: "#44ff44" };
-            case ConnectionState.CONNECTING:
-                return { icon: "🟡", text: "Connecting...", color: "#ffaa00" };
-            case ConnectionState.RECONNECTING:
-                return { icon: "🟡", text: `Reconnecting... (${retryInfo.attempts}/${retryInfo.maxRetries})`, color: "#ffaa00" };
-            case ConnectionState.ERROR:
-                return { icon: "🔴", text: connectionError || "Connection Error", color: "#ff4444" };
-            case ConnectionState.DISCONNECTED:
-            default:
-                return { icon: "⚫", text: "Disconnected", color: "#666666" };
-        }
-    };
-
-    const connectionStatus = getConnectionStatusInfo();
-
     return (
-        <div style={{position: "relative"}}>
-            {/* 连接状态指示器 */}
-            <div
-                style={{
-                    position: "absolute",
-                    top: 8,
-                    right: 8,
-                    background: "rgba(0, 0, 0, 0.8)",
-                    color: "#fff",
-                    padding: "6px 10px",
-                    borderRadius: "6px",
-                    zIndex: 10,
-                    fontSize: "12px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    border: `2px solid ${connectionStatus.color}`
-                }}
-            >
-                <span>{connectionStatus.icon}</span>
-                <span style={{ color: connectionStatus.color }}>
-                    {connectionStatus.text}
-                </span>
-                {(connectionState === ConnectionState.ERROR || connectionState === ConnectionState.DISCONNECTED) && (
-                    <button
-                        onClick={onManualReconnect}
-                        style={{
-                            background: "#44ff44",
-                            border: "none",
-                            color: "#000",
-                            padding: "2px 6px",
-                            borderRadius: "3px",
-                            fontSize: "10px",
-                            cursor: "pointer",
-                            marginLeft: "4px"
-                        }}
-                    >
-                        🔄 Retry
-                    </button>
-                )}
-            </div>
-
+        <div ref={containerRef} style={{ position: "relative", width: "100%" }}>
             {/* 播放控制器 */}
             <div
                 style={{
@@ -538,7 +430,7 @@ export default function VideoLikePoseCanvas2D({
                     background: "rgba(0, 0, 0, 0.8)",
                     color: "#fff",
                     padding: "8px 12px",
-                    borderRadius: "6px",
+                    borderRadius: "4px",
                     zIndex: 10,
                     fontSize: "12px",
                     display: "flex",
@@ -547,21 +439,6 @@ export default function VideoLikePoseCanvas2D({
                 }}
             >
                 <div style={{display: "flex", gap: "12px", alignItems: "center"}}>
-                    <button
-                        onClick={togglePlayback}
-                        style={{
-                            background: isPlaying ? "#ff4444" : "#44ff44",
-                            border: "none",
-                            color: "#000",
-                            padding: "4px 8px",
-                            borderRadius: "3px",
-                            fontSize: "11px",
-                            cursor: "pointer"
-                        }}
-                    >
-                        {isPlaying ? "⏸ Pause" : "▶ Play"}
-                    </button>
-
                     <div>FPS:
                         <select
                             value={playbackFps}
@@ -571,7 +448,7 @@ export default function VideoLikePoseCanvas2D({
                                 background: "#333",
                                 color: "#fff",
                                 border: "1px solid #555",
-                                borderRadius: "2px"
+                                borderRadius: "4px"
                             }}
                         >
                             <option value={15}>15</option>
@@ -592,7 +469,7 @@ export default function VideoLikePoseCanvas2D({
                             border: "none",
                             color: "#fff",
                             padding: "4px 8px",
-                            borderRadius: "3px",
+                            borderRadius: "4px",
                             fontSize: "11px",
                             cursor: "pointer"
                         }}
@@ -612,61 +489,16 @@ export default function VideoLikePoseCanvas2D({
                 </div>
             </div>
 
-            {/* 调试信息 */}
-            {showDebug && (
-                <div
-                    style={{
-                        position: "absolute",
-                        top: 8,
-                        left: 8,
-                        background: "rgba(0, 0, 0, 0.85)",
-                        color: "#00ff00",
-                        padding: "10px 14px",
-                        fontSize: "12px",
-                        fontFamily: "monospace",
-                        zIndex: 10,
-                        borderRadius: "6px",
-                        lineHeight: 1.5
-                    }}
-                >
-                    <div>🎬 Mode: {isPlaying ? "Playing" : "Paused"}</div>
-                    <div>🎯 Player: {selectedDisplayId ? 
-                        (availableDisplayIds.find(d => d.id === selectedDisplayId)?.label || 'Unknown') 
-                        : "All"}</div>
-                    <div>📊 Target: {playbackFps}fps</div>
-                    <div>📐 Canvas: {width}×{height}</div>
-                    <div>🎥 Video: {videoWidth}×{videoHeight}</div>
-                    <div>📏 Scale: {(width/videoWidth).toFixed(2)}x, {(height/videoHeight).toFixed(2)}y</div>
-                    <div>🔍 Available: [{availableDisplayIds.map(d => 
-                        d.type === 'jersey' ? `#${d.displayValue}` : `T${d.displayValue}`
-                    ).join(", ")}]</div>
-                    <div>Frame: {currentFrame?.frameIndex ?? "-"}</div>
-                    <div style={{ color: connectionStatus.color }}>
-                        🔗 WS: {connectionState} 
-                        {connectionState === ConnectionState.RECONNECTING && ` (${retryInfo.attempts}/${retryInfo.maxRetries})`}
-                    </div>
-                    {connectionError && (
-                        <div style={{ color: "#ff4444", fontSize: "10px" }}>
-                            Error: {connectionError}
-                        </div>
-                    )}
-                </div>
-            )}
-
             <canvas
                 ref={canvasRef}
-                width={width}
-                height={height}
                 style={{
+                    width: '100%',
+                    height: `${canvasSize.height}px`,
                     display: 'block',
                     imageRendering: 'auto',
-                    border: `2px solid ${connectionState === ConnectionState.CONNECTED 
-                        ? (isPlaying ? '#00ff00' : '#ff4444')
-                        : connectionStatus.color}`,
                     borderRadius: '4px',
                     cursor: 'pointer'
                 }}
-                onClick={togglePlayback}
             />
         </div>
     );

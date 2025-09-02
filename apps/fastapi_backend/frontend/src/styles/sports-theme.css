@@ -7,12 +7,12 @@
   --sports-accent: #2196F3;     /* Blue */
   --sports-warning: #FF8F00;    /* Amber */
   --sports-error: #D32F2F;      /* Red */
-  
+
   /* Jersey-specific colors */
   --jersey-gold: #FFD700;
   --jersey-silver: #C0C0C0;
   --jersey-bronze: #CD7F32;
-  
+
   /* Performance indicators */
   --performance-excellent: #4CAF50;
   --performance-good: #8BC34A;
@@ -148,7 +148,7 @@
   .sports-dashboard-card {
     margin-bottom: 16px;
   }
-  
+
   .performance-bar {
     height: 4px;
   }
@@ -162,4 +162,20 @@
 
 .data-updated {
   animation: data-update 0.5s ease-out;
+}
+
+/* Scrollable segmented controls */
+.segmented-scroll-x {
+  height: 55px;
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+.segmented-scroll-x::-webkit-scrollbar {
+  height: 6px;
+}
+
+.segmented-scroll-x::-webkit-scrollbar-thumb {
+  background: #aaa;
+  border-radius: 4px;
 }

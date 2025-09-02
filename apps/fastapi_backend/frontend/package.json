@@ -13,7 +13,6 @@
     "@mantine/hooks": "^7.12.1",
     "@mantine/notifications": "^7.12.1",
     "@tabler/icons-react": "^3.34.1",
-    "@vitejs/plugin-react": "^5.0.0",
     "axios": "^1.7.7",
     "axios-retry": "^4.5.0",
     "hls.js": "^1.5.13",
@@ -26,9 +25,10 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
-    "@types/node": "^20.14.12",
+    "@types/node": "^20.19.11",
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.7.0",
     "typescript": "^5.5.4",
     "vite": "^5.3.3"
   }
