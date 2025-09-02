@@ -95,6 +95,7 @@ async def upload_video(
             file_size=file_path.stat().st_size,
             created_at=datetime.utcnow(),
             status="completed",
+            file_url=f"/media/uploads/{file.filename}",
             output_video_path=output_video_path,
             stream_url=f"{RTSP_BASE_URL}/{task_id}"
         )

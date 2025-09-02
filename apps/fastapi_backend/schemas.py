@@ -47,6 +47,7 @@ class VideoUploadRecord(BaseModel):
     status: str  # initializing, processing, completed, failed
     output_video_path: Optional[str] = None
     stream_url: str
+    file_url: Optional[str] = None
 
     class Config:
         json_encoders = {
