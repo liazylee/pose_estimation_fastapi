@@ -118,7 +118,7 @@ class MultiInputInterface:
                         #             f"Receiving interface: {interface_idx}"
                         #         )
                         else:
-                            logging.debug(f"Frame {frame_id} waiting for interfaces: {missing_interfaces}")
+                            logging.debug(f"Frame {frame_id} waiting for interfaces: ")
                 if completed_payload is not None:
                     await self._queue.put(completed_payload)
                     logging.debug(f"Synchronized frame {frame_id} with {self._num_interfaces} interfaces")

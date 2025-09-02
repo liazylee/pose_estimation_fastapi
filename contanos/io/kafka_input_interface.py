@@ -3,7 +3,6 @@ import asyncio.subprocess
 import json
 import logging
 import time
-import uuid
 from abc import ABC
 from asyncio import Queue
 from concurrent.futures import ThreadPoolExecutor
@@ -36,9 +35,7 @@ class KafkaInput(ABC):
         self.bootstrap_servers = config["bootstrap_servers"]
         self.topic = config['topic']
         self.group_id = config.get('group_id', f"kafka_input_{int(time.time())}")
-        unique_suffix = str(uuid.uuid4())[:8]  # Add unique suffix
-        self.group_id = f"{self.group_id}_{unique_suffix}"
-        self.auto_offset_reset = config.get('auto_offset_reset', 'earliest')
+        self.auto_offset_reset = config.get('auto_offset_reset', 'latest')
         self.max_poll_records = config.get('max_poll_records', 1)
         self.consumer_timeout_ms = config.get('consumer_timeout_ms', 10)
         self.enable_auto_commit = config.get('enable_auto_commit', True)
