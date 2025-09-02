@@ -34,12 +34,6 @@ api.interceptors.response.use(
 export const streamApi = axios.create({
     baseURL: import.meta.env.DEV ? '/hls' : import.meta.env.VITE_API_HLS || '',
     timeout: 20000,  // 不宜过长，HLS 应该快速响应
-    headers: {
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache',
-        'Expires': '0',
-        'Accept': 'application/vnd.apple.mpegurl',
-    },
 });
 
 axiosRetry(streamApi, {
