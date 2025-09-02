@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { Alert, Badge, Button, Group, Stack, Text } from '@mantine/core';
 import { useGlobalStore } from '@/store/global';
-import { streamApi } from '@/api/http';
 
 type Props = {
     path: string; // e.g. "outstream_<task_id>"
@@ -23,21 +22,39 @@ export default function MediaPlayer({ path }: Props) {
     const setM3u8Ready = useGlobalStore(s => s.setM3u8Ready);
     const setAspectRatio = useGlobalStore(s => s.setAspectRatio);
     const setVideoDuration = useGlobalStore(s => s.setVideoDuration);
-    const setVideoPaused= useGlobalStore(s => s.setVideoPaused);
 
     const hlsUrl = useMemo(() => `${hlsHost}/${path}/index.m3u8`, [path, hlsHost]);
     const webrtcApiUrl = useMemo(() => `${webrtcHost}/${path}/whep`, [path, webrtcHost]);
 
     // 自动探测 m3u8 状态
     useEffect(() => {
-        const checkM3u8 = async () => {
-            try {
-                await streamApi.get(`/${path}/index.m3u8`);
-            } catch {}
+        let isActive = true;
+
+        const checkM3u8 = async (retries = 20, delayMs = 1000) => {
+            for (let i = 0; i < retries; i++) {
+                if (!isActive) return false;
+
+                try {
+                    const res = await fetch(hlsUrl, {method: 'GET', cache: 'no-cache'});
+
+                    if (res.ok && res.status !== 404) {
+                        if (isActive) setM3u8Ready(true);
+                        return true;
+                    }
+                } catch (e) {}
+
+                await new Promise(resolve => setTimeout(resolve, delayMs));
+            }
+            return false;
         };
-        if(path){
-            checkM3u8()
+
+        if (path) {
+            checkM3u8();
         }
+
+        return () => {
+            isActive = false;
+        };
     }, [path]);
 
     // WebRTC 播放逻辑 (MediaMTX WHEP)
@@ -245,23 +262,6 @@ export default function MediaPlayer({ path }: Props) {
             }
         };
     }, [streamType, webrtcApiUrl]);
-
-    // 视频暂停播放状态同步
-    useEffect(() => {
-        const video = videoRef.current;
-        if (!video) return;
-
-        const handlePause = () => setVideoPaused(true);
-        const handlePlay = () => setVideoPaused(false);
-
-        video.addEventListener('pause', handlePause);
-        video.addEventListener('play', handlePlay);
-
-        return () => {
-            video.removeEventListener('pause', handlePause);
-            video.removeEventListener('play', handlePlay);
-        };
-    }, []);
 
     // 卸载时清空 isM3u8Ready
     useEffect(() => {

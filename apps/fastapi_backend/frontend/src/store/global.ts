@@ -10,9 +10,9 @@ interface GlobalState {
     // 视频总时长，秒为单位，null表示未知
     videoDuration: number | null;
     setVideoDuration: (duration: number) => void;
-    // 视频暂停播放
-    isVideoPaused: boolean;
-    setVideoPaused: (paused: boolean) => void;
+    // canvas和图表暂停播放
+    isPaused: boolean;
+    setPaused: (paused: boolean) => void;
 }
 
 export const useGlobalStore = create<GlobalState>((set) => ({
@@ -25,6 +25,6 @@ export const useGlobalStore = create<GlobalState>((set) => ({
     videoDuration: null,
     setVideoDuration: (duration) => set({ videoDuration: duration }),
 
-    isVideoPaused: false,
-    setVideoPaused: (paused) => set({ isVideoPaused: paused})
+    isPaused: false,
+    setPaused: (paused) => set({ isPaused: paused})
 }));

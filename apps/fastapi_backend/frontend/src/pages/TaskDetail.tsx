@@ -122,6 +122,9 @@ class SharedWebSocketManager {
 
 export default function TaskDetail() {
     const isM3u8Ready = useGlobalStore(s => s.isM3u8Ready);
+    const isPaused = useGlobalStore(s => s.isPaused);
+    const setPaused = useGlobalStore(s => s.setPaused);
+
     const {taskId = ''} = useParams();
 
     const [rtsp, setRtsp] = useState<string>('');
@@ -245,7 +248,25 @@ export default function TaskDetail() {
                             />
                         )}
 
-                        <Text fw={600} size="lg" mt='lg'>🎯 Pose Tracking</Text>
+                        <Group justify="space-between" align="center">
+                            <Text fw={600} size="lg" mt='lg'>🎯 Pose Tracking</Text>
+                            {/* 暂停按钮 */}
+                            <button
+                                type="button"
+                                onClick={()=>setPaused(!isPaused)}
+                                style={{
+                                    background: "#4444ff",
+                                    border: "none",
+                                    color: "#fff",
+                                    padding: "4px 8px",
+                                    borderRadius: "4px",
+                                    fontSize: "11px",
+                                    cursor: "pointer"
+                                }}
+                            >
+                                {isPaused ? "▶ Play" : "⏸ Pause"}
+                            </button>
+                        </Group>
 
                         <VideoLikePoseCanvas2D
                             frameData={latestFrameData}

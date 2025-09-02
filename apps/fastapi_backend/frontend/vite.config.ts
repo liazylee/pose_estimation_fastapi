@@ -8,8 +8,6 @@ export default defineConfig(({ mode }) => {
 
     const baseHost = env.VITE_API_BASE
     const wsHost = env.VITE_API_WS
-    const hlsHost = env.VITE_API_HLS;
-    const webrtcHost = env.VITE_API_WEBRTC;
 
     return {
         plugins: [react()],
@@ -20,12 +18,6 @@ export default defineConfig(({ mode }) => {
                 '^/(api|upload|status|result|streams|health|records|media)': {
                     target: baseHost,
                     changeOrigin: true,
-                },
-                '/whep': webrtcHost,
-                '/hls': {
-                    target: hlsHost,
-                    changeOrigin: true,
-                    rewrite: (path) => path.replace(/^\/hls/, '') // 去掉前缀
                 },
                 '/ws': {
                     target: wsHost,

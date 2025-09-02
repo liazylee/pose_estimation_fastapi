@@ -152,7 +152,7 @@ export default function VideoLikePoseCanvas2D({
     const aspectRatio = useGlobalStore(s => s.aspectRatio);
 
     // 流视频是否已暂停
-    const isVideoPaused = useGlobalStore(s => s.isVideoPaused);
+    const isPaused = useGlobalStore(s => s.isPaused);
 
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -338,7 +338,7 @@ export default function VideoLikePoseCanvas2D({
 
     // 播放循环
     const playLoop = useCallback(() => {
-        if (isVideoPaused) {
+        if (isPaused) {
             animationRef.current = requestAnimationFrame(playLoop);
             return;
         }
@@ -348,7 +348,7 @@ export default function VideoLikePoseCanvas2D({
         setBufferLevel(bufferSize);
 
         // 检查是否应该播放下一帧
-        if (!isVideoPaused && playbackController.current.shouldPlayNextFrame()) {
+        if (!isPaused && playbackController.current.shouldPlayNextFrame()) {
             if (frameBuffer.current.hasFrames()) {
                 const nextFrame = frameBuffer.current.getNextFrame();
                 if (nextFrame) {
@@ -373,7 +373,7 @@ export default function VideoLikePoseCanvas2D({
                 }
             }
         }
-    }, [drawFrame,isVideoPaused]);
+    }, [drawFrame,isPaused]);
 
     const changeFps = useCallback((fps: number) => {
         playbackController.current.setFps(fps);

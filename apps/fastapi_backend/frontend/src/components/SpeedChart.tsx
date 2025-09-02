@@ -52,7 +52,7 @@ export default function SpeedChart({
     // 视频总时长（秒）
     const videoDuration = useGlobalStore(s => s.videoDuration);
     // 流视频是否已暂停
-    const isVideoPaused = useGlobalStore(s => s.isVideoPaused);
+    const isPaused = useGlobalStore(s => s.isPaused);
 
     const [speedData, setSpeedData] = useState<SpeedDataPoint[]>([]);
     const [availableDisplayIds, setAvailableDisplayIds] = useState<DisplayIdInfo[]>([]);
@@ -77,7 +77,7 @@ export default function SpeedChart({
         if (!frameData) return;
 
         // 流视频暂停时不更新数据
-        if (isVideoPaused) return;
+        if (isPaused) return;
 
         const frame = frameData?.tracked_poses_results ? frameData : frameData?.results?.[0];
         if (!frame) return;
@@ -238,7 +238,7 @@ export default function SpeedChart({
                 </div>
             </div>
 
-            {isVideoPaused && (
+            {isPaused && (
                 <Text size="sm" c="dimmed" ta="center">
                     ▶ Video paused – speed chart updates stopped
                 </Text>
