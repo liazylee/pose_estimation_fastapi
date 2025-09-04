@@ -10,12 +10,12 @@
 
 # Optional TODOs
 
-- [ ]   add more AI services (calculate the speed of the person etc.)
+- [x]   add more AI services (calculate the speed of the person etc.)
 - [ ]   optimize the performance of the AI services into batch processing
 - [ ]   optimize the algorithm of each AI service (e.g. YOLOX, RTMPose, ByteTrack)
 - [ ]   refactor the codebase to improve the code quality(right now the code is not very clean)
 - [ ]   add more tests to ensure the code quality
-- [ ]   add more documentation to the codebase
-- [ ]   beautify the annotation service UI
-- [ ]   add more features to the annotation service (e.g. save the data to the database, export the data to different
+- [x]   add more documentation to the codebase
+- [x]   beautify the annotation service UI
+- [x]   add more features to the annotation service (e.g. save the data to the database, export the data to different
   formats)

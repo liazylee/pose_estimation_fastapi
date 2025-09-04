@@ -1,10 +1,10 @@
-### AI Multi-Person Pose Estimation Pipeline (FastAPI + Kafka + Docker)
+# AI Multi-Person Pose Estimation Pipeline (FastAPI + Kafka + Docker)
 
 This repository implements a modular, microservice-based video analytics pipeline for multi-person pose estimation. It
 uses FastAPI services orchestrated over Kafka topics, with per-task isolation via dynamic topic names. The base
 infrastructure (Kafka, Zookeeper, RTSP server, MongoDB) is provided via Docker Compose.
 
-Services
+# Services
 
 - YOLOX Service (object detection)
     - Input: `raw_frames_{task_id}` → Output: `yolox_detections_{task_id}`
@@ -18,7 +18,7 @@ Services
 - FastAPI Backend (orchestrator + UI)
     - Starts/stops services, manages Kafka topics, exposes dashboard and APIs
 
-Quick start (with Docker infrastructure)
+## Quick start (with Docker infrastructure)
 
 1) Start base services via Docker (Kafka, Zookeeper, RTSP, MongoDB)
 
@@ -172,7 +172,32 @@ Troubleshooting
 - MongoDB disabled or unreachable → disable `mongodb` output in `annotation.outputs` or fix URI
 - Topics not created → ensure backend is used to create topics (auto-create is disabled in Docker compose)
 
-License
-MIT (unless specified otherwise)
+# License
+MIT License
 
+Copyright (c) 2025 liazylee
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+# Acknowledgement
+This work has received funding as an Open Call project under the SPARTA project from the European Union's Horizon Europe programme Autonomous, scalablE, tRustworthy, intelligent European meta Operating System for the IoT edge-cloud continuum (aerOS) (grant agreement No. 101069732).
+
+LINK: https://aeros-project.eu/
 
