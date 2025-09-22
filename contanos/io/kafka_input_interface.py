@@ -238,6 +238,8 @@ class KafkaInput(ABC):
             if self.message_queue.qsize() >= self._queue_high_watermark:
                 await asyncio.sleep(0.001)  # Minimal delay
             await self.message_queue.put(message)
+        # sleep a bit to yield control
+        await asyncio.sleep(0.5)
         if len(res) != total_frames:
             logger.error(f'the frame is not ordered')
         # logger.info(

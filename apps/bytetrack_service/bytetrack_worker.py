@@ -190,7 +190,6 @@ class ByteTrackWorker(BaseWorker):
             cy = 0.5 * (y1 + y2)
             h = max(1.0, y2 - y1)
 
-            # 初始化轨迹缓存
             if tid not in self._track_history:
                 self._track_history[tid] = deque(maxlen=int(self.frame_rate * 2))  # 存最多2秒
             if tid not in self._speed_smoothed:
@@ -199,13 +198,11 @@ class ByteTrackWorker(BaseWorker):
             history = self._track_history[tid]
             history.append((ts_curr, cx, cy, h))
 
-            # 清理超过1.5秒的点，保留更多历史数据
             while history and (ts_curr - history[0][0]) > 1.5:
                 history.popleft()
 
-            # 计算原始速度
             raw_speed = 0.0
-            if len(history) >= 8:  # 增加到至少8个点来减少噪声
+            if len(history) >= 8:
                 times = np.array([pt[0] for pt in history])
                 x_coords = np.array([pt[1] for pt in history])
                 y_coords = np.array([pt[2] for pt in history])
@@ -226,8 +223,7 @@ class ByteTrackWorker(BaseWorker):
                     max_speed_mps = 12.0
                     raw_speed = min(raw_speed, max_speed_mps)
 
-            # 指数移动平均平滑，更小的平滑系数
-            alpha = 0.15  # 平滑系数减小，更加平滑
+            alpha = 0.15
             self._speed_smoothed[tid] = alpha * raw_speed + (1 - alpha) * self._speed_smoothed[tid]
 
             t["speed_mps"] = float(self._speed_smoothed[tid])

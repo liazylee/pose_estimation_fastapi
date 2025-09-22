@@ -68,7 +68,6 @@ pandas==2.3.1
 pillow==11.3.0
 platformdirs==4.3.8
 pluggy==1.6.0
--e git+https://github.com/liazylee/pose_estimation_fastapi.git@542a733ab01ff3de3d0b212463f2742c4802dfd8#egg=pose_estimation_fastapi
 prometheus_client==0.22.1
 prompt_toolkit==3.0.51
 protobuf==6.31.1

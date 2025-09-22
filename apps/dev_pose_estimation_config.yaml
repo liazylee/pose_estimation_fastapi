@@ -107,7 +107,7 @@ rtmpose:
 bytetrack:
   enabled: true
   # BoTSORT specific parameters
-  reid_weights: "osnet_x1_0_msmt17.pth"  # ReID model weights path
+  reid_weights: "osnet_x0_25_msmt17.pt"  # ReID model weights path
   half: false  # Use half precision
   track_high_thresh: 0.7  # Lowered from 0.6 for better detection
   track_low_thresh: 0.1
