@@ -60,10 +60,28 @@ class AnnotationService(BaseAIService):
         logger.info(f"Tracking topic: {track_config.get('topic')}")
 
         return [
-            KafkaInput(raw_config),
+            KafkaInput(
+                raw_config,
+                metrics_service=self.get_service_name(),
+                metrics_task_id=self.task_id,
+                metrics_topic=raw_config.get('topic'),
+                metrics_worker_id='input-raw',
+            ),
             # KafkaInput(det_config),
-            KafkaInput(pose_config),
-            KafkaInput(track_config)
+            KafkaInput(
+                pose_config,
+                metrics_service=self.get_service_name(),
+                metrics_task_id=self.task_id,
+                metrics_topic=pose_config.get('topic'),
+                metrics_worker_id='input-pose',
+            ),
+            KafkaInput(
+                track_config,
+                metrics_service=self.get_service_name(),
+                metrics_task_id=self.task_id,
+                metrics_topic=track_config.get('topic'),
+                metrics_worker_id='input-track',
+            )
         ]
 
     def create_output_interface(self) -> MultiOutputInterface:

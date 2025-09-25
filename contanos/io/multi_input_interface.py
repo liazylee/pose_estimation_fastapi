@@ -5,13 +5,29 @@ from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, List, Dict, Optional, Tuple
 
+from contanos.metrics.prometheus import (
+    MetricsLabelContext,
+    service_backpressure_events_total,
+    service_frames_dropped_total,
+    service_interfaces_under_pressure,
+    service_pending_frames,
+)
+
 
 class MultiInputInterface:
     """Improved wrapper for multiple input interfaces with intelligent synchronization."""
 
-    def __init__(self, interfaces: List[Any], frame_timeout_sec: float = 20, 
-                 sync_mode: str = "adaptive", max_memory_mb: int = 512,
-                 enable_backpressure_monitoring: bool = True):
+    def __init__(
+        self,
+        interfaces: List[Any],
+        frame_timeout_sec: float = 20,
+        sync_mode: str = "adaptive",
+        max_memory_mb: int = 512,
+        enable_backpressure_monitoring: bool = True,
+        metrics_service: Optional[str] = None,
+        metrics_task_id: Optional[str] = None,
+        metrics_topic: str = "multi_input",
+    ):
         self.interfaces = interfaces
         self.is_running = False
         self._executor = ThreadPoolExecutor(max_workers=len(interfaces))
@@ -57,6 +73,33 @@ class MultiInputInterface:
             'last_pressure_check': time.time()
         }
 
+        self._metrics_context = MetricsLabelContext(
+            service=metrics_service or "unknown",
+            worker_id="multi_input",
+            topic=metrics_topic or "multi_input",
+            initial_task_id=metrics_task_id,
+        )
+
+    def _extract_task_id(self, payload: Dict[int, Any]) -> Optional[str]:
+        for value in payload.values():
+            if isinstance(value, dict) and value.get('task_id') is not None:
+                return value.get('task_id')
+        return None
+
+    def _record_pending_frames(self, task_id: Optional[str] = None) -> None:
+        labels = self._metrics_context.labels_for(task_id)
+        service_pending_frames.labels(**labels).set(len(self._frame_id_order))
+
+    def _record_frame_drop(self, task_id: Optional[str] = None) -> None:
+        labels = self._metrics_context.labels_for(task_id)
+        service_frames_dropped_total.labels(**labels).inc()
+
+    def _update_interfaces_under_pressure_metric(self) -> None:
+        labels = self._metrics_context.labels_for(None)
+        service_interfaces_under_pressure.labels(**labels).set(
+            len(self._backpressure_stats['interfaces_under_pressure'])
+        )
+
     async def initialize(self) -> bool:
         """Initialize all input interfaces and start producers."""
         try:
@@ -76,6 +119,8 @@ class MultiInputInterface:
                 self._producer_tasks.append(task)
 
             logging.info("MultiInputInterface initialized successfully")
+            self._record_pending_frames()
+            self._update_interfaces_under_pressure_metric()
             return True
 
         except Exception as e:
@@ -96,9 +141,12 @@ class MultiInputInterface:
                     logging.warning(f"Interface {interface_idx} provided no frame_id, skipping")
                     continue
 
+                task_id = data.get('task_id') if isinstance(data, dict) else None
+                self._metrics_context.labels_for(task_id)
+
                 # Update interface speed tracking
                 await self._update_interface_speed(interface_idx, frame_id)
-                
+
                 # Monitor backpressure if enabled
                 if self.enable_backpressure_monitoring:
                     await self._monitor_interface_backpressure(interface_idx, interface)
@@ -109,14 +157,18 @@ class MultiInputInterface:
                         self._frame_id_order.append(frame_id)
 
                     self._data_dict[frame_id][interface_idx] = data
-                    
+
                     # Intelligent buffer management
                     await self._manage_buffer_adaptively(frame_id)
-                    
+
                     # Check for completed frames with intelligent sync strategy
                     completed_payload = await self._check_frame_completion(frame_id)
-                    
+
+                self._record_pending_frames(task_id)
+
                 if completed_payload is not None:
+                    payload_task_id = self._extract_task_id(completed_payload)
+                    self._metrics_context.labels_for(payload_task_id)
                     await self._queue.put(completed_payload)
                     self._sync_stats['total_frames_processed'] += 1
                     logging.debug(f"Synchronized frame {completed_payload.get('frame_id')} with sync mode: {self.sync_mode}")
@@ -145,18 +197,23 @@ class MultiInputInterface:
         if hasattr(interface, 'get_queue_status'):
             try:
                 status = interface.get_queue_status()
+                task_id = status.get('task_id')
+                self._metrics_context.labels_for(task_id)
                 usage_percent = status.get('usage_percent', 0)
-                
+
                 # Consider interface under pressure if queue usage > 75%
                 if usage_percent > 75:
                     if interface_idx not in self._backpressure_stats['interfaces_under_pressure']:
                         self._backpressure_stats['interfaces_under_pressure'].append(interface_idx)
                         logging.warning(f"[BACKPRESSURE_MONITOR] Interface {interface_idx} under pressure: {usage_percent:.1f}% queue usage")
+                        service_backpressure_events_total.labels(**self._metrics_context.current_labels).inc()
                 else:
                     if interface_idx in self._backpressure_stats['interfaces_under_pressure']:
                         self._backpressure_stats['interfaces_under_pressure'].remove(interface_idx)
                         logging.info(f"[BACKPRESSURE_MONITOR] Interface {interface_idx} pressure relieved: {usage_percent:.1f}% queue usage")
-                        
+
+                self._update_interfaces_under_pressure_metric()
+
             except Exception as e:
                 logging.debug(f"Could not monitor backpressure for interface {interface_idx}: {e}")
     
@@ -202,14 +259,18 @@ class MultiInputInterface:
                 
             old_frame_id = self._frame_id_order.popleft()
             if old_frame_id in self._data_dict:
-                # Log detailed cleanup information
-                missing_interfaces = [i for i in range(self._num_interfaces) 
-                                    if i not in self._data_dict[old_frame_id]]
-                available_interfaces = list(self._data_dict[old_frame_id].keys())
-                
+                frame_payload = self._data_dict[old_frame_id]
+                task_id = self._extract_task_id(frame_payload)
+
+                missing_interfaces = [i for i in range(self._num_interfaces)
+                                    if i not in frame_payload]
+                available_interfaces = list(frame_payload.keys())
+
                 del self._data_dict[old_frame_id]
                 self._sync_stats['frames_dropped_overflow'] += 1
-                
+                self._record_frame_drop(task_id)
+                self._record_pending_frames(task_id)
+
                 logging.warning(
                     f"[SMART_CLEANUP] Dropped frame {old_frame_id}. "
                     f"Missing interfaces: {missing_interfaces}, Available: {available_interfaces}. "
@@ -228,8 +289,12 @@ class MultiInputInterface:
             while self._frame_id_order and self._frame_id_order[0] < stale_threshold:
                 old_id = self._frame_id_order.popleft()
                 if old_id in self._data_dict:
+                    frame_payload = self._data_dict[old_id]
+                    task_id = self._extract_task_id(frame_payload)
                     del self._data_dict[old_id]
                     self._sync_stats['frames_dropped_timeout'] += 1
+                    self._record_frame_drop(task_id)
+                    self._record_pending_frames(task_id)
                     logging.debug(f"Dropped stale frame {old_id} (threshold: {stale_threshold})")
     
     async def _check_frame_completion(self, frame_id: int) -> Optional[Dict[str, Any]]:
@@ -275,14 +340,17 @@ class MultiInputInterface:
             
         if frame_id > self._last_emitted_frame_id:
             self._last_emitted_frame_id = frame_id
-            
+
         # Merge all interface data (保持原来的格式)
         merged_data = {}
         for idx in sorted(completed_payload.keys()):
             part = completed_payload[idx]
             if isinstance(part, dict):
                 merged_data.update(part)  # simple merge, later keys overwrite earlier ones if conflict
-                
+
+        task_id = merged_data.get('task_id') or self._extract_task_id(completed_payload)
+        self._record_pending_frames(task_id)
+
         # Data integrity check - ensure critical fields exist
         if partial and 'image_bytes' not in merged_data:
             logging.warning(f"[DATA_INTEGRITY] Frame {frame_id} missing image_bytes in partial sync - skipping")
@@ -359,9 +427,12 @@ class MultiInputInterface:
                     self._queue.task_done()
                 except asyncio.QueueEmpty:
                     break
-                    
+
         # Shut down executor
         self._executor.shutdown(wait=True)
+        self._record_pending_frames()
+        self._backpressure_stats['interfaces_under_pressure'].clear()
+        self._update_interfaces_under_pressure_metric()
         logging.info("MultiInputInterface cleaned up")
     
     def _log_performance_summary(self):

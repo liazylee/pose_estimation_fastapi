@@ -3,6 +3,8 @@ import logging
 from datetime import datetime
 from typing import Dict, Optional
 
+from contanos.metrics.prometheus import service_worker_restarts_total
+
 from contanos.base_processor import BaseProcessor
 
 
@@ -131,6 +133,12 @@ class BaseService:
         # Create new task for the worker
         new_task = asyncio.create_task(worker.run())
         self.processor.worker_tasks[task_index] = new_task
+
+        try:
+            labels = worker.get_metrics_labels()
+            service_worker_restarts_total.labels(**labels).inc()
+        except Exception as exc:  # pragma: no cover - defensive, metrics should not break restarts
+            logging.debug(f"Failed to record metrics for worker restart {worker_id}: {exc}")
 
         logging.info(f"Worker {worker_id} restarted (attempt {self.restart_counts[worker_id]})")
 

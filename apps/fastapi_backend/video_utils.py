@@ -1,10 +1,19 @@
 import asyncio
 import json
-import json as pyjson
 import logging
 import math
+import time
 
 from aiokafka import AIOKafkaProducer
+
+from apps.fastapi_backend.metrics import (
+    backend_segment_bytes_sent_total,
+    backend_segment_extraction_seconds,
+    backend_segment_failures_total,
+    backend_segment_publish_seconds,
+    backend_segments_sent_total,
+    create_video_publish_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -85,31 +94,35 @@ async def get_video_metadata(video_path: str):
     )
     stdout3, _ = await proc3.communicate()
 
-    info = pyjson.loads(stdout3.decode())
+    info = json.loads(stdout3.decode())
     width = info['streams'][0]['width']
     height = info['streams'][0]['height']
 
     return duration, fps, width, height
 
 
-async def extract_and_publish_async(video_path: str,
-                                    task_id: str,
-                                    segment_time: float = 2.0,
-                                    bootstrap_servers: str = 'localhost:9092'):
-    """Async version: stream video segments to Kafka with preserved codec."""
+async def extract_and_publish_async(
+    video_path: str,
+    task_id: str,
+    segment_time: float = 2.0,
+    bootstrap_servers: str = 'localhost:9092',
+) -> None:
+    """Stream encoded video segments to Kafka while recording observability metrics."""
+
     duration, fps, width, height = await get_video_metadata(video_path)
     segment_count = math.ceil(duration / segment_time)
     channels = 3  # assuming bgr24
+
+    topic = f"raw_frames_{task_id}"
+    metrics_context = create_video_publish_context(topic=topic, task_id=task_id)
+    labels = metrics_context.labels_for(task_id)
 
     producer = AIOKafkaProducer(
         bootstrap_servers=bootstrap_servers,
         acks='all',
         max_request_size=10 * 1024 * 1024,
-
     )
     await producer.start()
-
-    topic = f"raw_frames_{task_id}"
 
     try:
         for segment_idx in range(segment_count):
@@ -120,6 +133,7 @@ async def extract_and_publish_async(video_path: str,
             # Extract video segment
             segment_gop = round(fps * segment_time)  # 25fps×2s=50
 
+            extract_start = time.perf_counter()
             ffmpeg_proc = await asyncio.create_subprocess_exec(
                 'ffmpeg',
                 '-ss', str(start_time), '-i', video_path,
@@ -134,11 +148,25 @@ async def extract_and_publish_async(video_path: str,
                 '-movflags', 'frag_keyframe+empty_moov',
                 'pipe:1',
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.DEVNULL
+                stderr=asyncio.subprocess.PIPE,
             )
-            stdout, _ = await ffmpeg_proc.communicate()
+            stdout, stderr = await ffmpeg_proc.communicate()
+            extract_duration = time.perf_counter() - extract_start
+            backend_segment_extraction_seconds.labels(**labels).observe(extract_duration)
+
+            if ffmpeg_proc.returncode != 0:
+                backend_segment_failures_total.labels(**labels).inc()
+                stderr_text = stderr.decode(errors='ignore') if stderr else ''
+                logger.error(
+                    f"[{task_id}] FFmpeg failed for segment {segment_idx} (frame {global_frame_idx}): "
+                    f"code={ffmpeg_proc.returncode}, stderr={stderr_text.strip()}"
+                )
+                raise RuntimeError(
+                    f"FFmpeg exited with code {ffmpeg_proc.returncode} while extracting segment {segment_idx}"
+                )
 
             if not stdout:
+                backend_segment_failures_total.labels(**labels).inc()
                 logger.warning(f"[{task_id}] Segment {segment_idx} is empty, skipping...")
                 continue
 
@@ -150,11 +178,23 @@ async def extract_and_publish_async(video_path: str,
                 "channels": channels,
                 "fps": fps,
                 "segment_idx": segment_idx,  # 添加分段索引用于调试
-                "start_time": start_time  # 添加开始时间用于调试
+                "start_time": start_time,  # 添加开始时间用于调试
             }).encode()
 
-            await producer.send_and_wait(topic, key=kafka_key, value=stdout)
-            logger.info(f"[{task_id}] ✅ Sent segment {segment_idx} (frame {global_frame_idx}, time {start_time:.2f}s)")
+            publish_start = time.perf_counter()
+            try:
+                await producer.send_and_wait(topic, key=kafka_key, value=stdout)
+            except Exception:
+                backend_segment_failures_total.labels(**labels).inc()
+                raise
+
+            publish_duration = time.perf_counter() - publish_start
+            backend_segment_publish_seconds.labels(**labels).observe(publish_duration)
+            backend_segments_sent_total.labels(**labels).inc()
+            backend_segment_bytes_sent_total.labels(**labels).inc(len(stdout))
+            logger.info(
+                f"[{task_id}] ✅ Sent segment {segment_idx} (frame {global_frame_idx}, time {start_time:.2f}s)"
+            )
 
     finally:
         await producer.stop()

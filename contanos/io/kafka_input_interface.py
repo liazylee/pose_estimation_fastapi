@@ -11,6 +11,12 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 from contanos.utils.serializers import encode_frame_to_base64
+from contanos.metrics.prometheus import (
+    MetricsLabelContext,
+    service_decode_errors_total,
+    service_input_queue_size,
+    service_messages_consumed_total,
+)
 
 logger = logging.getLogger(__name__)
 try:
@@ -27,7 +33,15 @@ except ImportError:
 class KafkaInput(ABC):
     """Kafka message input implementation using asyncio.Queue and kafka-python."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        *,
+        metrics_service: Optional[str] = None,
+        metrics_task_id: Optional[str] = None,
+        metrics_worker_id: Optional[str] = None,
+        metrics_topic: Optional[str] = None,
+    ):
         if not KAFKA_AVAILABLE:
             raise ImportError("kafka-python package is required. Install with: pip install kafka-python")
 
@@ -57,6 +71,32 @@ class KafkaInput(ABC):
         self.consumer = None
         self.is_running = False
         self._consumer_task = None
+
+        default_task = metrics_task_id or config.get('task_id') or 'default_task'
+        worker_label = str(metrics_worker_id) if metrics_worker_id is not None else 'input'
+        topic_label = metrics_topic or self.topic
+        service_label = metrics_service or 'unknown'
+        self._metrics_context = MetricsLabelContext(
+            service=service_label,
+            worker_id=worker_label,
+            topic=topic_label,
+            initial_task_id=default_task,
+        )
+        self._default_task_id = default_task
+
+    def _record_queue_enqueue(self, task_id: Optional[str], count: int = 1) -> None:
+        labels = self._metrics_context.labels_for(task_id)
+        if count:
+            service_messages_consumed_total.labels(**labels).inc(count)
+        service_input_queue_size.labels(**labels).set(self.message_queue.qsize())
+
+    def _update_queue_size(self, task_id: Optional[str] = None) -> None:
+        labels = self._metrics_context.labels_for(task_id)
+        service_input_queue_size.labels(**labels).set(self.message_queue.qsize())
+
+    def _record_decode_error(self, task_id: Optional[str] = None) -> None:
+        labels = self._metrics_context.labels_for(task_id)
+        service_decode_errors_total.labels(**labels).inc()
 
     # initialize the Kafka consumer and start the background loop
     async def initialize(self) -> bool:
@@ -118,13 +158,16 @@ class KafkaInput(ABC):
             message_str = record.value.decode('utf-8')
             message = json.loads(message_str)
             if isinstance(message, dict) and 'frame_id' in message:
+                task_id = message.get('task_id', self._default_task_id)
+                message.setdefault('task_id', task_id)
                 # Quick check: if queue is too full, apply light backpressure
                 if self.message_queue.qsize() >= self._backpressure_threshold:
                     await asyncio.sleep(0.01)  # Light delay
                 await self.message_queue.put(message)
+                self._record_queue_enqueue(task_id)
                 return
-        except(UnicodeDecodeError, json.JSONDecodeError):
-            pass
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._record_decode_error()
 
         start_frame_id_str = record.key
         if not start_frame_id_str:
@@ -139,6 +182,7 @@ class KafkaInput(ABC):
             channels = int(key_dict.get('channels', 3))
             fps = int(key_dict.get('fps', 30))
 
+            task_id = key_dict.get('task_id', self._default_task_id)
             await self._decode_and_queue_frames(
                 video_segment_bytes=record.value,
                 frame_id_start=frame_id_start,
@@ -146,6 +190,7 @@ class KafkaInput(ABC):
                 height=height,
                 channels=channels,
                 fps=fps,
+                task_id=task_id,
             )
         except (ValueError, TypeError) as e:
             logger.error(f"Error parsing Kafka key: {e}")
@@ -161,6 +206,7 @@ class KafkaInput(ABC):
             height: int,
             channels: int = 3,
             fps: float = 30.0,
+            task_id: Optional[str] = None,
     ):
         """
         Decode video segment and enqueue base64 JPEG frames with metadata.
@@ -192,6 +238,7 @@ class KafkaInput(ABC):
                 f"FFmpeg decode failed (start={frame_id_start}), code={proc.returncode}, "
                 f"stderr={stderr_data.decode(errors='ignore')}"
             )
+            self._record_decode_error(task_id)
             return
 
         frame_size = width * height * channels
@@ -225,8 +272,9 @@ class KafkaInput(ABC):
             ts_iso = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(ts_ns / 1e9))
             ts_iso += f".{ts_ns % 1_000_000_000:09d}Z"
 
+            message_task_id = task_id or self._default_task_id
             message = {
-                "task_id": "default_task",
+                "task_id": message_task_id,
                 "frame_id": frame_id,
                 "timestamp": ts_iso,
                 "image_format": "jpeg",
@@ -238,6 +286,7 @@ class KafkaInput(ABC):
             if self.message_queue.qsize() >= self._queue_high_watermark:
                 await asyncio.sleep(0.001)  # Minimal delay
             await self.message_queue.put(message)
+            self._record_queue_enqueue(message_task_id)
         # sleep a bit to yield control
         await asyncio.sleep(0.5)
         if len(res) != total_frames:
@@ -267,6 +316,7 @@ class KafkaInput(ABC):
         finally:
             if message is not None:
                 self.message_queue.task_done()
+                self._update_queue_size(message.get('task_id'))
 
     async def _handle_backpressure(self):
         """Handle backpressure when queue is getting full."""
@@ -322,6 +372,7 @@ class KafkaInput(ABC):
             except asyncio.QueueEmpty:
                 break
 
+        self._update_queue_size()
         logger.info("Kafka input cleaned up")
 
     def get_queue_status(self) -> Dict[str, Any]:

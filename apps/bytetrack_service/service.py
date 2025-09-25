@@ -74,7 +74,15 @@ class ByteTrackService(BaseAIService):
                         'input_name': input_name  # Add input name for identification
                     }
 
-                    interfaces.append(KafkaInput(config=final_config))
+                    interfaces.append(
+                        KafkaInput(
+                            config=final_config,
+                            metrics_service=self.get_service_name(),
+                            metrics_task_id=self.task_id,
+                            metrics_topic=final_config.get('topic'),
+                            metrics_worker_id=f"input-{input_name}",
+                        )
+                    )
                     logger.info(
                         f"{input_name} input - Topic: {final_config.get('topic')}, Group: {final_config.get('group_id')}")
         else:
@@ -82,7 +90,14 @@ class ByteTrackService(BaseAIService):
             input_config = self._get_kafka_input_config()
             logger.info(f"Legacy input topic: {input_config.get('topic')}")
             logger.info(f"Legacy consumer group: {input_config.get('group_id')}")
-            interfaces.append(KafkaInput(config=input_config))
+            interfaces.append(
+                KafkaInput(
+                    config=input_config,
+                    metrics_service=self.get_service_name(),
+                    metrics_task_id=self.task_id,
+                    metrics_topic=input_config.get('topic'),
+                )
+            )
 
         return interfaces
 
@@ -93,7 +108,12 @@ class ByteTrackService(BaseAIService):
         output_config = self._get_kafka_output_config()
         logger.info(f"Output topic: {output_config.get('topic')}")
 
-        return KafkaOutput(config=output_config)
+        return KafkaOutput(
+            config=output_config,
+            metrics_service=self.get_service_name(),
+            metrics_task_id=self.task_id,
+            metrics_topic=output_config.get('topic'),
+        )
 
     def get_model_config(self) -> dict:
         """Get BoTSORT model configuration."""
