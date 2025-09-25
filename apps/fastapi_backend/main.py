@@ -3,12 +3,16 @@ FastAPI backend for multi-user AI video analysis platform.
 Refactored modular version.
 """
 from contextlib import asynccontextmanager
+from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from prometheus_client import Info as PrometheusInfo
+from prometheus_fastapi_instrumentator import Instrumentator
+from prometheus_fastapi_instrumentator import metrics as instrumentator_metrics
 from starlette.responses import FileResponse
 
 from config import APP_TITLE, APP_VERSION, STATIC_DIR, CORS_SETTINGS, logger, FRONTEND_DIST_DIR, UPLOAD_DIR
@@ -22,10 +26,50 @@ from routes.video import router as video_router
 from routes.websocket_pose import router as websocket_pose_router
 
 
+instrumentator: Optional[Instrumentator] = None
+metrics_registered: bool = False
+backend_info_metric: Optional[PrometheusInfo] = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan management."""
+    global instrumentator, metrics_registered, backend_info_metric
+
     logger.info("Starting AI Video Analysis Platform...")
+
+    if instrumentator is None:
+        instrumentator = Instrumentator()
+        instrumentator.add(instrumentator_metrics.default())
+
+        backend_info_metric = PrometheusInfo(
+            "fastapi_backend_info",
+            "Static metadata about the FastAPI backend service.",
+        )
+
+        from apps.fastapi_backend.metrics import (
+            backend_active_tasks,
+            backend_task_progress_percent,
+            create_task_context,
+        )
+
+        default_context = create_task_context(task_id=None)
+        default_labels = default_context.labels_for(None)
+        backend_active_tasks.labels(**default_labels).set(0)
+        backend_task_progress_percent.labels(**default_labels).set(0)
+
+        def _record_backend_info(_: instrumentator_metrics.Info) -> None:
+            if backend_info_metric is not None:
+                backend_info_metric.info({"service_name": APP_TITLE})
+
+        instrumentator.add(_record_backend_info)
+
+    if backend_info_metric is not None:
+        backend_info_metric.info({"service_name": APP_TITLE})
+
+    if instrumentator is not None and not metrics_registered:
+        instrumentator.instrument(app).expose(app, include_in_schema=False)
+        metrics_registered = True
 
     # Initialize all services
     await initialize_services()

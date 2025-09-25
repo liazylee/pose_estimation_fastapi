@@ -18,6 +18,8 @@ infrastructure (Kafka, Zookeeper, RTSP server, MongoDB) is provided via Docker C
 - FastAPI Backend (orchestrator + UI)
     - Starts/stops services, manages Kafka topics, exposes dashboard and APIs
 
+All FastAPI services (backend and AI microservices) expose Prometheus metrics at `/metrics` for scraping.
+
 ## Quick start (with Docker infrastructure)
 
 1) Start base services via Docker (Kafka, Zookeeper, RTSP, MongoDB)
@@ -138,6 +140,8 @@ Backend APIs (selected)
 - Annotation helpers
     - GET `/api/annotation/{task_id}/rtsp_url`, `/api/annotation/{task_id}/videos`,
       `/api/annotation/{task_id}/download/{filename}`, `/api/annotation/{task_id}/status`
+- Observability
+    - GET `/metrics` Prometheus metrics for the backend (each AI microservice exposes the same endpoint)
 
 Data formats (high level)
 

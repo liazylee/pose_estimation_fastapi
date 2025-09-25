@@ -147,7 +147,11 @@ class BaseAIService(ABC):
         self.input_interfaces = input_interfaces
 
         # Create MultiInputInterface with default settings (恢复原始逻辑)
-        self.multi_input_interface = MultiInputInterface(interfaces=input_interfaces)
+        self.multi_input_interface = MultiInputInterface(
+            interfaces=input_interfaces,
+            metrics_service=self.get_service_name(),
+            metrics_task_id=self.task_id,
+        )
         await self.multi_input_interface.initialize()
 
         # Create output interface
@@ -159,7 +163,11 @@ class BaseAIService(ABC):
     async def _create_processor(self):
         """Create processor with workers."""
         devices = self._get_devices()
-        model_config = self.get_model_config()
+        model_config = dict(self.get_model_config())
+        model_config.setdefault('task_id', self.task_id)
+        model_config.setdefault('service_name', self.get_service_name())
+        if self.output_interface and hasattr(self.output_interface, 'topic'):
+            model_config.setdefault('output_topic', getattr(self.output_interface, 'topic', 'unknown'))
         processing_config = self._get_processing_config()
 
         logger.info(f"Using devices: {devices}")

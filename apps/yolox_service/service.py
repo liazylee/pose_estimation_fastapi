@@ -47,14 +47,26 @@ class YOLOXService(BaseAIService):
         logger.info(f"Input topic: {input_config.get('topic')}")
         logger.info(f"Consumer group: {input_config.get('group_id')}")
 
-        return [KafkaInput(config=input_config)]
+        return [
+            KafkaInput(
+                config=input_config,
+                metrics_service=self.get_service_name(),
+                metrics_task_id=self.task_id,
+                metrics_topic=input_config.get('topic'),
+            )
+        ]
 
     def create_output_interface(self) -> KafkaOutput:
         """Create Kafka output interface for detections."""
         output_config = self._get_kafka_output_config()
         logger.info(f"Output topic: {output_config.get('topic')}")
 
-        return KafkaOutput(config=output_config)
+        return KafkaOutput(
+            config=output_config,
+            metrics_service=self.get_service_name(),
+            metrics_task_id=self.task_id,
+            metrics_topic=output_config.get('topic'),
+        )
 
     def get_model_config(self) -> Dict[str, Any]:
         """Get YOLOX model configuration."""

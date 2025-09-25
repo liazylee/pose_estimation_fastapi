@@ -5,7 +5,7 @@ import json
 import logging
 import time
 from abc import ABC
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 try:
     from kafka import KafkaProducer
@@ -16,11 +16,26 @@ except ImportError:
     KAFKA_AVAILABLE = False
     logging.warning("kafka-python not installed. Please install it with: pip install kafka-python")
 
+from contanos.metrics.prometheus import (
+    MetricsLabelContext,
+    service_messages_produced_total,
+    service_output_queue_size,
+    service_send_failures_total,
+)
+
 
 class KafkaOutput(ABC):
     """Kafka output implementation using kafka-python producer + asyncio.Queue."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        *,
+        metrics_service: Optional[str] = None,
+        metrics_task_id: Optional[str] = None,
+        metrics_worker_id: Optional[str] = None,
+        metrics_topic: Optional[str] = None,
+    ):
         if not KAFKA_AVAILABLE:
             raise ImportError("kafka-python package is required. Install with: pip install kafka-python")
 
@@ -40,6 +55,34 @@ class KafkaOutput(ABC):
         self.queue: asyncio.Queue = asyncio.Queue(maxsize=int(config.get("queue_max_len", 100)))
         self.is_running: bool = False
         self._producer_task: asyncio.Task | None = None
+
+        default_task = metrics_task_id or config.get('task_id') or 'default_task'
+        worker_label = str(metrics_worker_id) if metrics_worker_id is not None else 'output'
+        topic_label = metrics_topic or self.topic
+        service_label = metrics_service or 'unknown'
+        self._metrics_context = MetricsLabelContext(
+            service=service_label,
+            worker_id=worker_label,
+            topic=topic_label,
+            initial_task_id=default_task,
+        )
+        self._default_task_id = default_task
+
+    def _record_queue_enqueue(self, task_id: Optional[str]) -> None:
+        labels = self._metrics_context.labels_for(task_id)
+        service_output_queue_size.labels(**labels).set(self.queue.qsize())
+
+    def _record_produced(self, task_id: Optional[str]) -> None:
+        labels = self._metrics_context.labels_for(task_id)
+        service_messages_produced_total.labels(**labels).inc()
+
+    def _record_send_failure(self, task_id: Optional[str]) -> None:
+        labels = self._metrics_context.labels_for(task_id)
+        service_send_failures_total.labels(**labels).inc()
+
+    def _update_queue_size(self, task_id: Optional[str] = None) -> None:
+        labels = self._metrics_context.labels_for(task_id)
+        service_output_queue_size.labels(**labels).set(self.queue.qsize())
 
     async def initialize(self) -> bool:
         """
@@ -80,8 +123,16 @@ class KafkaOutput(ABC):
         assert self.producer is not None
 
         while self.is_running:
+            results: Dict[str, Any] | None = None
+            task_id: Optional[str] = None
             try:
                 results = await asyncio.wait_for(self.queue.get(), timeout=1.0)
+                if isinstance(results, dict):
+                    task_id = results.get('task_id', self._default_task_id)
+                    results.setdefault('task_id', task_id)
+                else:
+                    task_id = self._default_task_id
+                self._metrics_context.labels_for(task_id)
 
                 # Send message via Kafka producer (run in executor to avoid blocking)
                 loop = asyncio.get_running_loop()
@@ -95,11 +146,17 @@ class KafkaOutput(ABC):
 
                 logging.debug(f"Published to {self.topic}: {results.get('frame_id', 'unknown')}")
                 self.queue.task_done()
+                self._record_produced(task_id)
+                self._update_queue_size(task_id)
 
             except asyncio.TimeoutError:
                 continue  # idle loop – no message yet
             except Exception as e:
                 logging.error(f"Unexpected error in output producer: {e}")
+                if results is not None:
+                    self._record_send_failure(task_id)
+                    self.queue.task_done()
+                    self._update_queue_size(task_id)
 
     async def write_data(self, results: Dict[str, Any]) -> bool:
         """Put results into the outbound queue."""
@@ -111,7 +168,10 @@ class KafkaOutput(ABC):
             if 'timestamp' not in results:
                 results['timestamp'] = time.time()
 
+            task_id = results.get('task_id', self._default_task_id)
+            results.setdefault('task_id', task_id)
             await self.queue.put(results)
+            self._record_queue_enqueue(task_id)
             return True
         except Exception as e:
             logging.error(f"Failed to queue data: {e}")
@@ -146,4 +206,5 @@ class KafkaOutput(ABC):
             self.queue.get_nowait()
             self.queue.task_done()
 
+        self._update_queue_size()
         logging.info("Kafka output cleaned up")

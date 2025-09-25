@@ -50,8 +50,20 @@ class RTMPoseService(BaseAIService):
         logger.info(f"Detections input topic: {detections_config.get('topic')}")
 
         return [
-            KafkaInput(config=frames_config),
-            KafkaInput(config=detections_config)
+            KafkaInput(
+                config=frames_config,
+                metrics_service=self.get_service_name(),
+                metrics_task_id=self.task_id,
+                metrics_topic=frames_config.get('topic'),
+                metrics_worker_id='input-frames',
+            ),
+            KafkaInput(
+                config=detections_config,
+                metrics_service=self.get_service_name(),
+                metrics_task_id=self.task_id,
+                metrics_topic=detections_config.get('topic'),
+                metrics_worker_id='input-detections',
+            )
         ]
 
     def create_output_interface(self) -> KafkaOutput:
@@ -59,7 +71,12 @@ class RTMPoseService(BaseAIService):
         output_config = self._get_kafka_output_config()
         logger.info(f"Output topic: {output_config.get('topic')}")
 
-        return KafkaOutput(config=output_config)
+        return KafkaOutput(
+            config=output_config,
+            metrics_service=self.get_service_name(),
+            metrics_task_id=self.task_id,
+            metrics_topic=output_config.get('topic'),
+        )
 
     def get_model_config(self) -> Dict[str, Any]:
         """Get RTMPose model configuration."""
